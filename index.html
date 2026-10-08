@@ -990,14 +990,14 @@ const Passport = (()=>{
     for(let r=-12;r<12;r++){ let row=''; for(let c=0;c<14;c++) row += pool[(r*7+c*3+144)%pool.length]+' '; ctx.fillText(row, -620, r*30); }
     ctx.restore();
 
-    // верхняя полоска: самый популярный маршрут
+    // верхняя полоска: самый популярный аэропорт
     const A1=[244,114,182], A2=[94,224,200], A3=[167,139,250];
     for(let i=0;i<22;i++){
       const x=26+i*49, c=mix(i<11?A1:A3, i<11?A3:A2, (i%11)/10);
       const alpha = 0.35 + 0.65*Math.abs(Math.sin(i*0.45));
       if(i===4 || i===15){
         ctx.font='800 34px Inter, sans-serif'; ctx.fillStyle=`rgba(${c},${alpha})`;
-        ctx.fillText(i===4 ? S.route[0] : S.route[1], x-14, 82);
+        ctx.fillText(S.home, x-14, 82);
         i+=2; continue;
       }
       planeIcon(x, 70, 28, `rgba(${c},${alpha})`);
