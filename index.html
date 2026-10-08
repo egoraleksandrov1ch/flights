@@ -40,7 +40,7 @@
   .periods::-webkit-scrollbar{display:none}
   .periods button{flex:none;border-radius:999px;padding:7px 14px;font-size:14px}
   .periods button.on{background:var(--accent);color:#1a1205;border-color:transparent}
-  .pcard{position:relative;border-radius:20px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);background:#1b2340;aspect-ratio:3/4}
+  .pcard{position:relative;aspect-ratio:3/4;filter:drop-shadow(0 20px 40px rgba(0,0,0,.45))}
   .pcard canvas{display:block;width:100%;height:auto}
   .ploading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:14px}
   .psave{width:100%;margin-top:14px;font-size:16px;height:48px;border-radius:12px}
@@ -212,13 +212,13 @@
 <div class="pmodal" id="passportModal" hidden>
   <div class="pbox">
     <div class="phead">
-      <h2>Лётный <span>паспорт</span></h2>
+      <h2>Посадочный <span>талон</span></h2>
       <button id="passClose" type="button" title="Закрыть">✕</button>
     </div>
     <div class="periods" id="passPeriods"></div>
-    <div class="pcard"><canvas id="passCv" width="1080" height="1440"></canvas><div class="ploading" id="passLoading">Рисую паспорт…</div></div>
+    <div class="pcard"><canvas id="passCv" width="1080" height="1440"></canvas><div class="ploading" id="passLoading">Печатаю талон…</div></div>
     <button class="primary psave" id="passSave" type="button" disabled>Сохранить фото</button>
-    <div class="phint">Только совершённые перелёты. Время в полёте — оценка по расстоянию.</div>
+    <div class="phint">Только совершённые перелёты. Время в воздухе — оценка по расстоянию.</div>
   </div>
 </div>
 
@@ -871,20 +871,200 @@ fetch('airports.json').then(r=>r.json()).then(rows=>{
 </script>
 <script>
 // ======================================================================
-//  Лётный паспорт — модальное окно «Поделиться»
+//  Посадочный талон — модальное окно «Поделиться»
 // ======================================================================
 const Passport = (()=>{
   const W = 1080, H = 1440;
-  const MAP = { x:40, y:120, w:1000, h:560 };
-  const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
   const modal = document.getElementById('passportModal');
   const cv = document.getElementById('passCv'), ctx = cv.getContext('2d');
   let LAND = null, landLoading = null, period = 'all';
 
-  const isDone = f => !f.date || f.date <= todayStr();
-  function fmtD(s, compact){ const [y,m,d]=s.split('-'); return compact ? `${d}${MON[+m-1]}${y.slice(2)}` : `${d} ${MON[+m-1]} ${y.slice(2)}`; }
-  function flagEmoji(cc){ return cc && cc.length===2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)) : ''; }
-  function mix(c1,c2,t){ return c1.map((v,i)=>Math.round(v+(c2[i]-v)*t)); }
+// палитра «бумага и чернила»
+const PAPER = '#f7f2e8', PAPER2 = '#efe7d6', INK = '#16213e', INK2 = '#5b6478', ORANGE = '#ff6b35', ORANGE2 = '#ffb38a';
+const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+const isDone = f => !f.date || f.date <= todayStr();
+function fmtD(s){ const [y,m,d]=s.split('-'); return `${d} ${MON[+m-1]} ${y}`; }
+function fmtN(n){ return Math.round(n).toLocaleString('en-US').replace(/,/g,' '); }
+function flagEmoji(cc){ return cc && cc.length===2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)) : ''; }
+
+function compute(){
+  const all = flights.filter(f=>BY_IATA[f.from] && BY_IATA[f.to] && isDone(f));
+  const list = (period==='all' ? all : all.filter(f=>(f.date||'').startsWith(period)))
+    .sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
+  let km = 0, longest = null; const ap = {}, routes = {}, airlines = new Set(), countries = [];
+  for(const f of list){
+    const a=BY_IATA[f.from], b=BY_IATA[f.to], d=dist(a,b);
+    km += d; if(!longest || d>longest.d) longest = {f, d};
+    ap[f.from]=(ap[f.from]||0)+1; ap[f.to]=(ap[f.to]||0)+1;
+    const k=[f.from,f.to].sort().join('-'); routes[k]=(routes[k]||0)+1;
+    const al=(f.airline||'').replace(/\s*\d+\s*$/,'').trim().toLowerCase(); if(al) airlines.add(al);
+  }
+  for(const f of [...list].reverse()){ const c=BY_IATA[f.to].country; if(c && !countries.includes(c)) countries.push(c); }
+  const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1])[0];
+  const topAp = Object.entries(ap).sort((a,b)=>b[1]-a[1]);
+  const home = topAp[0]?.[0] || '---';
+  const tr = top(routes);
+  let route = tr ? tr[0].split('-') : [home, '---'];
+  if(route[1]===home) route=[route[1],route[0]];
+  const dates = list.map(f=>f.date).filter(Boolean).sort();
+  const hours = list.reduce((s,f)=>s + dist(BY_IATA[f.from],BY_IATA[f.to])/780 + 0.5, 0);
+  return { list, km, hours, airports:Object.keys(ap).length, airlines:airlines.size, countries, home,
+           route, routeCount: tr?.[1] || 0, top2: [topAp[0]||['---',0], topAp[1]||['---',0]], longest, first: dates[0], last: dates[dates.length-1] };
+}
+
+// ---------- проекция карты (равнопромежуточная, обрезанная) ----------
+const MAP = { x:60, y:470, w:960, h:330 };
+const LAT_T = 78, LAT_B = -56;
+function proj(lon, lat){ return [MAP.x + (lon+180)/360*MAP.w, MAP.y + (LAT_T-lat)/(LAT_T-LAT_B)*MAP.h]; }
+let landPathCache = null;
+function landPath(){
+  if(landPathCache) return landPathCache;
+  const p = new Path2D();
+  for(const poly of LAND) for(const ring of poly){
+    let prev=null; const pts=[];
+    for(const [l0,lat] of ring){ let l=l0; if(prev!==null){ while(l-prev>180) l-=360; while(l-prev<-180) l+=360; } pts.push([l,lat]); prev=l; }
+    const minL=Math.min(...pts.map(q=>q[0])), maxL=Math.max(...pts.map(q=>q[0]));
+    const shifts=[0]; if(maxL>180) shifts.push(-360); if(minL<-180) shifts.push(360);
+    for(const sh of shifts){ pts.forEach(([l,lat],i)=>{ const [x,y]=proj(l+sh,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); p.closePath(); }
+  }
+  return landPathCache = p;
+}
+
+// ---------- примитивы ----------
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x,y,w,h,r) : ctx.rect(x,y,w,h); }
+function plane(x,y,s,color,rot=0){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(rot); ctx.scale(s/24,s/24); ctx.fillStyle=color; ctx.beginPath();
+  ctx.moveTo(12,0); ctx.lineTo(9,-2); ctx.lineTo(1,-2); ctx.lineTo(-4,-10); ctx.lineTo(-7,-10); ctx.lineTo(-4,-2); ctx.lineTo(-9,-2);
+  ctx.lineTo(-11,-5); ctx.lineTo(-13,-5); ctx.lineTo(-12,0); ctx.lineTo(-13,5); ctx.lineTo(-11,5); ctx.lineTo(-9,2); ctx.lineTo(-4,2);
+  ctx.lineTo(-7,10); ctx.lineTo(-4,10); ctx.lineTo(1,2); ctx.lineTo(9,2); ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function label(t,x,y,align='left'){ ctx.textAlign=align; ctx.fillStyle=INK2; ctx.font='600 22px Inter, sans-serif'; ctx.fillText(t.toUpperCase().split('').join(' '),x,y); ctx.textAlign='left'; }
+function value(t,x,y,size=46,align='left',color=INK){ ctx.textAlign=align; ctx.fillStyle=color; ctx.font=`800 ${size}px Inter, sans-serif`; ctx.fillText(t,x,y); ctx.textAlign='left'; }
+function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
+function rng(seed){ return ()=>{ seed^=seed<<13; seed^=seed>>>17; seed^=seed<<5; return (seed>>>0)/4294967296; }; }
+
+const STUB_Y = 1150;   // линия отрыва
+
+function draw(){
+  const S = compute();
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  rr(0,0,W,H,40); ctx.clip();
+
+  // бумага
+  let g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,PAPER); g.addColorStop(1,PAPER2);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // лёгкая «волокнистая» фактура
+  const R = rng(7);
+  for(let i=0;i<1400;i++){ ctx.fillStyle=`rgba(120,100,70,${R()*0.05})`; ctx.fillRect(R()*W, R()*H, 1+R()*2, 1); }
+
+  // шапка
+  ctx.fillStyle=INK; ctx.fillRect(0,0,W,150);
+  ctx.fillStyle=ORANGE; ctx.fillRect(0,150,W,8);
+  ctx.beginPath(); ctx.arc(100,75,40,0,7); ctx.fillStyle=ORANGE; ctx.fill();
+  plane(100,75,46,'#fff',-0.5);
+  ctx.fillStyle='#fff'; ctx.font='800 40px Inter, sans-serif'; ctx.fillText('FLIGHT LOG', 160, 72);
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font='600 22px Inter, sans-serif'; ctx.fillText('BOARDING PASS  ·  PERSONAL RECORD', 160, 106);
+  ctx.textAlign='right';
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font='600 20px Inter, sans-serif'; ctx.fillText('PERIOD', W-60, 62);
+  ctx.fillStyle='#fff'; ctx.font='800 40px Inter, sans-serif'; ctx.fillText(period==='all'?'ALL TIME':period, W-60, 106);
+  ctx.textAlign='left';
+
+  // два самых популярных аэропорта
+  const [[ra, na], [rb, nb]] = S.top2, A = BY_IATA[ra], B = BY_IATA[rb];
+  label(`#1 · ${na}×`, 60, 222); label(`#2 · ${nb}×`, W-60, 222, 'right');
+  value(ra, 56, 340, 128); value(rb || '---', W-56, 340, 128, 'right');
+  ctx.fillStyle=INK2; ctx.font='500 28px Inter, sans-serif';
+  ctx.fillText(A ? A.city : '', 60, 388);
+  ctx.textAlign='right'; ctx.fillText(B ? B.city : '', W-60, 388); ctx.textAlign='left';
+  // пунктирная дуга с самолётом
+  ctx.save(); ctx.setLineDash([3,10]); ctx.lineCap='round'; ctx.strokeStyle=INK2; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(445,300); ctx.quadraticCurveTo(540,220,635,300); ctx.stroke(); ctx.restore();
+  plane(540, 256, 46, ORANGE, 0);
+  ctx.textAlign='center'; ctx.fillStyle=ORANGE; ctx.font='700 22px Inter, sans-serif';
+  ctx.fillText('TOP AIRPORTS', 540, 340); ctx.textAlign='left';
+
+  // разделитель
+  ctx.strokeStyle='rgba(22,33,62,0.15)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(60,430); ctx.lineTo(W-60,430); ctx.stroke();
+
+  // карта из точек
+  if(LAND){
+    const lp = landPath(); const step = 9;
+    for(let y=MAP.y; y<=MAP.y+MAP.h; y+=step)
+      for(let x=MAP.x; x<=MAP.x+MAP.w; x+=step)
+        if(ctx.isPointInPath(lp, x, y)){ ctx.beginPath(); ctx.arc(x,y,2.7,0,7); ctx.fillStyle='rgba(22,33,62,0.22)'; ctx.fill(); }
+  }
+  ctx.save(); ctx.beginPath(); ctx.rect(MAP.x-6, MAP.y-60, MAP.w+12, MAP.h+80); ctx.clip();
+  const ends = new Map();
+  for(const f of S.list){
+    const a=BY_IATA[f.from], b=BY_IATA[f.to];
+    let lb=b.lon; if(lb-a.lon>180) lb-=360; else if(lb-a.lon<-180) lb+=360;
+    for(const sh of [0, lb>180?-360:lb<-180?360:null]){
+      if(sh===null) continue;
+      const [x1,y1]=proj(a.lon+sh,a.lat), [x2,y2]=proj(lb+sh,b.lat);
+      const d=Math.hypot(x2-x1,y2-y1)||1; let nx=-(y2-y1)/d, ny=(x2-x1)/d; if(ny>0){nx=-nx;ny=-ny;}
+      const bend=Math.min(110,d*0.25);
+      ctx.strokeStyle=ORANGE; ctx.globalAlpha=0.9; ctx.lineWidth=3; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo((x1+x2)/2+nx*bend,(y1+y2)/2+ny*bend,x2,y2); ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+    ends.set(a.iata, proj(a.lon,a.lat)); ends.set(b.iata, proj(b.lon,b.lat));
+  }
+  for(const [x,y] of ends.values()){ ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fillStyle=INK; ctx.fill(); ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fillStyle=PAPER; ctx.fill(); }
+  ctx.restore();
+
+  // поля талона
+  const days=Math.floor(S.hours/24), hrs=Math.round(S.hours%24);
+  const cols = [60, 400, 740];
+  const rows = [
+    [['Flights', String(S.list.length)], ['Distance', fmtN(S.km)+' km'], ['Airborne', days?`${days}d ${hrs}h`:`${Math.round(S.hours)}h`]],
+    [['Airports', String(S.airports)], ['Countries', String(S.countries.length)], ['Airlines', String(S.airlines||'—')]],
+    [['Longest', S.longest ? `${S.longest.f.from}–${S.longest.f.to}` : '—'], ['First flight', S.first ? fmtD(S.first) : '—'], ['Last flight', S.last ? fmtD(S.last) : '—']],
+  ];
+  rows.forEach((row,ri)=>{
+    const y = 870 + ri*96;
+    row.forEach(([l,v],ci)=>{ label(l, cols[ci], y); value(v, cols[ci], y+46, ri===2?34:46); });
+  });
+
+  // линия отрыва + вырезы
+  ctx.save(); ctx.setLineDash([14,12]); ctx.strokeStyle='rgba(22,33,62,0.35)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(50,STUB_Y); ctx.lineTo(W-50,STUB_Y); ctx.stroke(); ctx.restore();
+
+  // корешок: флаги + штрихкод
+  label('Countries visited', 60, 1200);
+  const flags = S.countries.slice(0,10), extra = S.countries.length-flags.length;
+  let fx = 84;
+  for(const cc of flags){
+    ctx.save(); ctx.beginPath(); ctx.arc(fx,1248,24,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.clip();
+    ctx.font='58px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(flagEmoji(cc), fx, 1251); ctx.restore();
+    ctx.beginPath(); ctx.arc(fx,1248,24,0,7); ctx.strokeStyle=PAPER; ctx.lineWidth=4; ctx.stroke();
+    fx += 42;
+  }
+  if(extra>0){ ctx.beginPath(); ctx.arc(fx,1248,24,0,7); ctx.fillStyle=INK; ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='700 18px Inter, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+'+extra,fx,1249); }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  if(!flags.length){ ctx.fillStyle=INK2; ctx.font='500 26px Inter, sans-serif'; ctx.fillText('—', 60, 1258); }
+
+  // штрихкод (уникален для набора перелётов)
+  const seedStr = S.list.map(f=>f.from+f.to+(f.date||'')).join('|') + period;
+  const R2 = rng(hash(seedStr)||1);
+  let bx = 60; const bw = W-120;
+  ctx.fillStyle=INK;
+  while(bx < 60+bw){ const w = 2 + Math.floor(R2()*4)*2; if(R2()>0.42) ctx.fillRect(bx, 1300, Math.min(w, 60+bw-bx), 72); bx += w + 2; }
+  ctx.fillStyle=INK2; ctx.font='500 22px "JetBrains Mono", monospace';
+  const seq = String(hash(seedStr)%1000000).padStart(6,'0');
+  ctx.fillText(`SEQ ${seq}  ·  HOME ${S.home}  ·  ISSUED ${fmtD(todayStr())}`, 60, 1410);
+
+  ctx.restore();
+
+  // вырезы по краям линии отрыва (прозрачные)
+  ctx.save(); ctx.globalCompositeOperation='destination-out';
+  for(const x of [0, W]){ ctx.beginPath(); ctx.arc(x, STUB_Y, 30, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
 
   function loadLand(){
     if(LAND) return Promise.resolve();
@@ -905,236 +1085,6 @@ const Passport = (()=>{
     return landLoading;
   }
 
-  function compute(){
-    const all = flights.filter(f=>BY_IATA[f.from] && BY_IATA[f.to] && isDone(f));
-    const list = (period==='all' ? all : all.filter(f=>(f.date||'').startsWith(period)))
-      .sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999'));
-    let km = 0; const apCount = {}, routes = {}, countries = [], airlines = new Set();
-    for(const f of list){
-      const a=BY_IATA[f.from], b=BY_IATA[f.to];
-      km += dist(a,b);
-      for(const x of [a,b]) apCount[x.iata]=(apCount[x.iata]||0)+1;
-      const key = [f.from,f.to].sort().join('-'); routes[key]=(routes[key]||0)+1;
-      const al = (f.airline||'').replace(/\s*\d+\s*$/,'').trim().toLowerCase();
-      if(al) airlines.add(al);
-    }
-    // флаги — страны прилёта, от последнего перелёта к первому
-    for(const f of [...list].reverse()){
-      const c = BY_IATA[f.to].country;
-      if(c && !countries.includes(c)) countries.push(c);
-    }
-    const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1])[0]?.[0];
-    const home = top(apCount) || '---';
-    let route = top(routes)?.split('-') || [home, home];
-    if(route[1]===home) route = [route[1], route[0]];   // маршрут начинается с «домашнего» аэропорта
-    const dates = list.map(f=>f.date).filter(Boolean).sort();
-    const hours = list.reduce((s,f)=>s + dist(BY_IATA[f.from],BY_IATA[f.to])/780 + 0.5, 0);
-    return { list, km, hours, airports:Object.keys(apCount).length, airlines:airlines.size, countries, home, route, since: dates[0] || null };
-  }
-
-  function millerY(lat){ return 1.25*Math.log(Math.tan(Math.PI/4 + 0.4*lat*RAD)); }
-  const Y_TOP = millerY(83.5), Y_BOT = millerY(-57);
-  function proj(lon, lat){
-    const k = MAP.w/(2*Math.PI);
-    return [MAP.x + (lon+180)/360*MAP.w,
-            MAP.y + (Y_TOP - millerY(Math.max(-85,Math.min(85,lat))))*k + (MAP.h - (Y_TOP-Y_BOT)*k)/2];
-  }
-  function landPath(dx=0, dy=0){
-    const p = new Path2D();
-    for(const poly of LAND) for(const ring of poly){
-      let prev = null; const pts = [];
-      for(const [lon0,lat] of ring){
-        let lon = lon0;
-        if(prev!==null){ while(lon-prev>180) lon-=360; while(lon-prev<-180) lon+=360; }
-        pts.push([lon,lat]); prev = lon;
-      }
-      const minL = Math.min(...pts.map(q=>q[0])), maxL = Math.max(...pts.map(q=>q[0]));
-      const shifts = [0]; if(maxL>180) shifts.push(-360); if(minL<-180) shifts.push(360);
-      for(const sh of shifts){
-        pts.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon+sh,lat); i ? p.lineTo(x+dx,y+dy) : p.moveTo(x+dx,y+dy); });
-        p.closePath();
-      }
-    }
-    return p;
-  }
-  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x,y,w,h,r) : ctx.rect(x,y,w,h); }
-  function planeIcon(x, y, s, color, rot=0){
-    ctx.save(); ctx.translate(x,y); ctx.rotate(rot); ctx.scale(s/24, s/24); ctx.fillStyle=color;
-    ctx.beginPath();
-    ctx.moveTo(12,0); ctx.lineTo(9,-2); ctx.lineTo(1,-2); ctx.lineTo(-4,-10); ctx.lineTo(-7,-10); ctx.lineTo(-4,-2); ctx.lineTo(-9,-2);
-    ctx.lineTo(-11,-5); ctx.lineTo(-13,-5); ctx.lineTo(-12,0); ctx.lineTo(-13,5); ctx.lineTo(-11,5); ctx.lineTo(-9,2); ctx.lineTo(-4,2);
-    ctx.lineTo(-7,10); ctx.lineTo(-4,10); ctx.lineTo(1,2); ctx.lineTo(9,2); ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
-
-  function draw(){
-    const S = compute();
-    ctx.clearRect(0,0,W,H);
-    let g = ctx.createLinearGradient(0,0,W*0.4,H);
-    g.addColorStop(0,'#bfe3fb'); g.addColorStop(0.45,'#b9b6f3'); g.addColorStop(1,'#9fd0f5');
-    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
-    g = ctx.createLinearGradient(0,740,0,H);
-    g.addColorStop(0,'rgba(120,100,230,0.28)'); g.addColorStop(1,'rgba(90,170,240,0.10)');
-    ctx.fillStyle = g; ctx.fillRect(0,740,W,H-740);
-
-    // гильош
-    ctx.save(); ctx.lineWidth = 1;
-    for(let i=0;i<46;i++){
-      ctx.strokeStyle = `rgba(255,255,255,${0.10 + (i%3===0?0.06:0)})`;
-      ctx.beginPath();
-      for(let x=0;x<=W;x+=12){ const y = i*32 + Math.sin(x/90 + i*0.7)*10 + Math.sin(x/37 + i)*3; x ? ctx.lineTo(x,y) : ctx.moveTo(x,y); }
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // текстура из IATA-кодов
-    ctx.save(); ctx.translate(W*0.62, 1040); ctx.rotate(-0.33);
-    ctx.font = '500 22px "JetBrains Mono", monospace'; ctx.fillStyle = 'rgba(80,60,170,0.045)';
-    const codes = [...new Set(S.list.flatMap(f=>[f.from,f.to]))];
-    const pool = codes.length ? codes : ['WAW','LHR','JFK','CDG','IST','DXB'];
-    for(let r=-12;r<12;r++){ let row=''; for(let c=0;c<14;c++) row += pool[(r*7+c*3+144)%pool.length]+' '; ctx.fillText(row, -620, r*30); }
-    ctx.restore();
-
-    // верхняя полоска: самый популярный аэропорт
-    const A1=[244,114,182], A2=[94,224,200], A3=[167,139,250];
-    for(let i=0;i<22;i++){
-      const x=26+i*49, c=mix(i<11?A1:A3, i<11?A3:A2, (i%11)/10);
-      const alpha = 0.35 + 0.65*Math.abs(Math.sin(i*0.45));
-      if(i===4 || i===15){
-        ctx.font='800 34px Inter, sans-serif'; ctx.fillStyle=`rgba(${c},${alpha})`;
-        ctx.fillText(S.home, x-14, 82);
-        i+=2; continue;
-      }
-      planeIcon(x, 70, 28, `rgba(${c},${alpha})`);
-    }
-
-    // карта
-    if(LAND){
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, MAP.y-20, W, MAP.h+30); ctx.clip();
-      ctx.fillStyle='rgba(90,70,200,0.18)'; ctx.fill(landPath(3,5));
-      ctx.clip(landPath());
-      g = ctx.createLinearGradient(MAP.x, MAP.y+MAP.h, MAP.x+MAP.w, MAP.y);
-      g.addColorStop(0,'#f59ad8'); g.addColorStop(0.45,'#e9a6ee'); g.addColorStop(0.7,'#b9c2f2'); g.addColorStop(1,'#62e3c9');
-      ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.fillRect(0,0,W,760);
-      ctx.strokeStyle = g; ctx.lineWidth = 2.6;
-      ctx.beginPath();
-      for(let y=MAP.y-10; y<MAP.y+MAP.h+10; y+=5.2){ ctx.moveTo(0,y); ctx.lineTo(W,y); }
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // перелёты
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, MAP.y-40, W, MAP.h+60); ctx.clip();
-    const ends = new Map();
-    for(const f of S.list){
-      const a=BY_IATA[f.from], b=BY_IATA[f.to];
-      let lb = b.lon; if(lb-a.lon>180) lb-=360; else if(lb-a.lon<-180) lb+=360;
-      for(const shift of [0, lb>180?-360:lb<-180?360:null]){
-        if(shift===null) continue;
-        const [x1,y1]=proj(a.lon+shift,a.lat), [x2,y2]=proj(lb+shift,b.lat);
-        const dx=x2-x1, dy=y2-y1, d=Math.hypot(dx,dy) || 1;
-        let nx=-dy/d, ny=dx/d; if(ny>0){ nx=-nx; ny=-ny; }
-        const bend = Math.min(140, d*0.22);
-        ctx.strokeStyle='rgba(55,25,150,0.85)'; ctx.lineWidth=3.2; ctx.lineCap='round';
-        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.quadraticCurveTo((x1+x2)/2+nx*bend,(y1+y2)/2+ny*bend,x2,y2); ctx.stroke();
-      }
-      ends.set(a.iata, proj(a.lon,a.lat)); ends.set(b.iata, proj(b.lon,b.lat));
-    }
-    for(const [x,y] of ends.values()){
-      ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(x,y,7.5,0,7); ctx.fill();
-      ctx.strokeStyle='#6d3cf0'; ctx.lineWidth=4; ctx.stroke();
-    }
-    ctx.restore();
-
-    // флаги
-    const flags = S.countries.slice(0, 12), extra = S.countries.length - flags.length;
-    const R = 26, step = 40, n = flags.length + (extra>0?1:0);
-    let fx = W/2 - ((n-1)*step)/2;
-    for(const cc of flags){
-      ctx.save();
-      ctx.beginPath(); ctx.arc(fx, 705, R, 0, 7); ctx.fillStyle='#fff'; ctx.fill(); ctx.clip();
-      ctx.font = '64px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-      ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(flagEmoji(cc), fx, 708);
-      ctx.restore();
-      ctx.beginPath(); ctx.arc(fx, 705, R, 0, 7); ctx.strokeStyle='#ffffff'; ctx.lineWidth=4; ctx.stroke();
-      fx += step;
-    }
-    if(extra>0){
-      ctx.beginPath(); ctx.arc(fx,705,R,0,7); ctx.fillStyle='#5b3fd6'; ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=4; ctx.stroke();
-      ctx.fillStyle='#fff'; ctx.font='700 20px Inter, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('+'+extra, fx, 706);
-    }
-    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-
-    ctx.save(); ctx.setLineDash([10,8]); ctx.strokeStyle='rgba(255,255,255,0.75)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(0,760); ctx.lineTo(W,760); ctx.stroke(); ctx.restore();
-
-    const INK = '#2a1470', INK2 = '#3b2b8f', SOFT = 'rgba(42,20,112,0.72)';
-    ctx.fillStyle = INK; ctx.font = '600 58px Inter, sans-serif';
-    ctx.fillText('MY FLIGHT PASSPORT', 48, 850);
-    roundRect(48, 872, 38, 22, 4); ctx.fillStyle=INK2; ctx.fill();
-    ctx.fillStyle='#d9d3ff'; ctx.beginPath(); ctx.arc(67,883,6,0,7); ctx.fill();
-    ctx.fillStyle = INK2; ctx.font = '600 24px Inter, sans-serif';
-    ctx.fillText('PASSPORT • PASS • PASAPORTE', 100, 893);
-
-    g = ctx.createLinearGradient(950,800,1032,882);
-    g.addColorStop(0,'#ffd6f5'); g.addColorStop(0.5,'#c9b8ff'); g.addColorStop(1,'#a8f0e6');
-    roundRect(950,800,82,82,20); ctx.fillStyle=g; ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=2; ctx.stroke();
-    planeIcon(991, 841, 52, '#ffffff', -0.6);
-
-    const N = S.list.length;
-    ctx.fillStyle = INK; ctx.font = '800 150px Inter, sans-serif';
-    ctx.fillText(String(N), 44, 1060);
-    ctx.font = '300 86px Inter, sans-serif'; ctx.fillStyle = INK2;
-    ctx.fillText(N===1 ? 'flight' : 'flights', 46, 1150);
-
-    const today = todayStr();
-    const rows = [
-      ['Period', period==='all' ? 'All time' : period],
-      ['Place of issue', S.home],
-      ['Date of issue', fmtD(today)],
-      ['First flight', S.since ? fmtD(S.since) : '—'],
-    ];
-    rows.forEach(([k,v],i)=>{
-      const y = 960 + i*58;
-      ctx.font = '400 30px Inter, sans-serif'; ctx.fillStyle = SOFT; ctx.fillText(k, 470, y);
-      const kw = ctx.measureText(k+' ').width;
-      ctx.fillStyle = INK; ctx.font = '600 30px Inter, sans-serif'; ctx.fillText(v, 470+kw, y);
-    });
-
-    const days = Math.floor(S.hours/24), hrs = Math.round(S.hours%24);
-    const timeStr = days ? `${days}d ${hrs}h` : `${Math.round(S.hours)}h`;
-    const stats = [
-      ['Distance', Math.round(S.km).toLocaleString('de-DE'), 'km', 48],
-      ['Flight Time', timeStr, '', 430],
-      ['Airports', String(S.airports), '', 715],
-      ['Airlines', String(S.airlines||'—'), '', 905],
-    ];
-    for(const [label,val,unit,x] of stats){
-      ctx.fillStyle=SOFT; ctx.font='500 28px Inter, sans-serif'; ctx.fillText(label, x, 1232);
-      ctx.fillStyle=INK; ctx.font='800 56px Inter, sans-serif'; ctx.fillText(val, x, 1296);
-      if(unit){ const w=ctx.measureText(val+' ').width; ctx.font='300 52px Inter, sans-serif'; ctx.fillText(unit, x+w, 1296); }
-    }
-
-    g = ctx.createLinearGradient(40,0,W-40,0);
-    g.addColorStop(0,'rgba(255,255,255,0.55)'); g.addColorStop(0.5,'rgba(220,210,255,0.55)'); g.addColorStop(1,'rgba(200,250,245,0.55)');
-    roundRect(36,1328,W-72,96,10); ctx.fillStyle=g; ctx.fill();
-    ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=2; ctx.stroke();
-    const pad = (s,n)=> (s + '<'.repeat(n)).slice(0,n);
-    const per = period==='all' ? 'ALLTIME' : 'YEAR'+period;
-    const L = 40;
-    const l1 = pad(`P<FLT<${per}<<${N}FLIGHTS<<${S.since ? 'SINCE'+fmtD(S.since,true) : ''}`, L);
-    const kmS = Math.round(S.km)+'KM';
-    const l2 = pad(`ISSUED${fmtD(today,true)}${S.home}<<`, L - kmS.length) + kmS;
-    ctx.fillStyle = '#20155c';
-    let fs = 34; ctx.font = `500 ${fs}px "JetBrains Mono", monospace`;
-    fs = Math.min(42, Math.floor(fs * (W-110) / ctx.measureText(l1).width));
-    ctx.font = `500 ${fs}px "JetBrains Mono", monospace`;
-    ctx.fillText(l1, 54, 1368); ctx.fillText(l2, 54, 1408);
-  }
-
   function renderPeriods(){
     const years = [...new Set(flights.filter(f=>f.date && isDone(f)).map(f=>f.date.slice(0,4)))].sort().reverse();
     if(period!=='all' && !years.includes(period)) period='all';
@@ -1147,14 +1097,13 @@ const Passport = (()=>{
   });
 
   async function open(){
-    // по умолчанию — тот же период, что выбран на карте
     period = (typeof yearFilter!=='undefined' && /^\d{4}$/.test(yearFilter)) ? yearFilter : 'all';
     modal.hidden = false; document.body.classList.add('modal-open');
     document.getElementById('passLoading').hidden = false;
     document.getElementById('passSave').disabled = true;
     renderPeriods();
     await Promise.race([
-      Promise.all([loadLand(), ...['800 50px Inter','600 50px Inter','300 50px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]),
+      Promise.all([loadLand(), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]),
       new Promise(r=>setTimeout(r,4000))
     ]);
     draw();
@@ -1167,7 +1116,8 @@ const Passport = (()=>{
   modal.addEventListener('click', e=>{ if(e.target===modal) close(); });
   addEventListener('keydown', e=>{ if(e.key==='Escape' && !modal.hidden) close(); });
   document.getElementById('passSave').onclick = async ()=>{
-    const name = `flight-passport-${period}.png`;
+    const name = `boarding-pass-${period}.png`;
+    // PNG сохраняет прозрачность: скруглённые углы и вырезы остаются
     const blob = await new Promise(r=>cv.toBlob(r,'image/png'));
     const file = new File([blob], name, {type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
