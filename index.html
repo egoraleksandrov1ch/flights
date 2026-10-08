@@ -2,67 +2,116 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
 <title>Мои перелёты</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#05070d; --panel:rgba(14,18,30,.86); --line:rgba(255,255,255,.08);
+    --bg:#05070d; --panel:rgba(14,18,30,.9); --line:rgba(255,255,255,.08);
     --text:#e8ecf5; --muted:#8a93a8; --accent:#ffb347; --accent2:#5ad1ff; --danger:#ff6b6b;
+    --safe-b:env(safe-area-inset-bottom,0px);
   }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden}
-  #globe{position:fixed;inset:0}
-  .panel{position:fixed;top:16px;left:16px;bottom:16px;width:360px;background:var(--panel);backdrop-filter:blur(14px);
-    border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;z-index:5;transition:transform .3s}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+  #globe{position:fixed;top:0;left:0;right:0;height:100%}
+
+  /* ---------- Panel (desktop) ---------- */
+  .panel{position:fixed;top:16px;left:16px;bottom:16px;width:360px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;z-index:5;transition:transform .3s ease}
   .panel.hidden{transform:translateX(calc(-100% - 20px))}
-  header{padding:18px 18px 10px}
-  h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
+  .grip{display:none}
+  header{display:flex;align-items:center;gap:8px;padding:18px 18px 10px}
+  h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;flex:1}
   h1 span{color:var(--accent)}
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px 18px 14px}
-  .stat{background:rgba(255,255,255,.04);border-radius:10px;padding:8px 6px;text-align:center}
-  .stat b{display:block;font-size:16px}
+  .icon-btn{padding:5px 10px;font-size:15px;line-height:1}
+  #addToggle{display:none}
+
+  .sel{margin:0 18px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,179,71,.12);border:1px solid rgba(255,179,71,.3);
+    display:flex;align-items:center;gap:10px}
+  .sel[hidden]{display:none}
+  .sel .route{font-family:"JetBrains Mono",monospace;font-size:15px}
+  .sel .meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .sel button{margin-left:auto;background:none;border:0;color:var(--muted);font-size:18px;padding:2px 6px}
+
+  .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0 18px 14px}
+  .stat{background:rgba(255,255,255,.04);border-radius:10px;padding:8px 4px;text-align:center;min-width:0}
+  .stat b{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stat small{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+
   form{padding:14px 18px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);display:grid;gap:8px}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .field{position:relative}
+  .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .field{position:relative;min-width:0}
   label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
-  input{width:100%;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--text);border-radius:8px;
-    padding:9px 10px;font:inherit;font-size:14px;outline:none}
+  input{display:block;width:100%;min-width:0;max-width:100%;height:40px;background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--text);border-radius:8px;
+    padding:0 10px;font:inherit;font-size:14px;outline:none;-webkit-appearance:none;appearance:none}
   input:focus{border-color:var(--accent)}
-  input[type=date]{color-scheme:dark}
+  input[type=date]{color-scheme:dark;text-align:left}
+  input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
+  input[type=date]::-webkit-calendar-picker-indicator{opacity:.6}
   .sugg{position:absolute;top:100%;left:0;right:0;margin-top:4px;background:#121827;border:1px solid var(--line);border-radius:8px;
-    max-height:240px;overflow:auto;z-index:20;display:none}
-  .sugg div{padding:8px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
+    max-height:240px;overflow:auto;z-index:20;display:none;min-width:220px}
+  .field:last-child .sugg{left:auto}
+  .sugg div{padding:9px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--line)}
   .sugg div:last-child{border:0}
   .sugg div:hover,.sugg div.active{background:rgba(255,179,71,.14)}
   .code{font-family:"JetBrains Mono",monospace;color:var(--accent);margin-right:6px}
   .sub{color:var(--muted);font-size:11px}
   button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--text);padding:9px 12px;font-size:13px}
   button:hover{background:rgba(255,255,255,.12)}
-  button.primary{background:var(--accent);color:#1a1205;border:0;font-weight:600}
+  button.primary{background:var(--accent);color:#1a1205;border:0;font-weight:600;height:42px}
   button.primary:hover{filter:brightness(1.08)}
-  .list{flex:1;overflow:auto;padding:8px 10px}
+
+  .list{flex:1;overflow:auto;padding:8px 10px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .flight{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;cursor:pointer}
   .flight:hover{background:rgba(255,255,255,.05)}
+  .flight.active{background:rgba(255,179,71,.12)}
+  .flight .info{min-width:0;flex:1}
   .flight .route{font-family:"JetBrains Mono",monospace;font-size:14px}
-  .flight .route i{color:var(--muted);font-style:normal;margin:0 4px}
-  .flight .meta{color:var(--muted);font-size:11px;margin-top:2px}
-  .flight .del{margin-left:auto;background:none;border:0;color:var(--muted);padding:4px 8px;font-size:16px}
+  .route i{color:var(--muted);font-style:normal;margin:0 4px}
+  .flight .meta{color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .flight .del{background:none;border:0;color:var(--muted);padding:6px 10px;font-size:18px;flex:none}
   .flight .del:hover{color:var(--danger)}
+  .year{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.08em;padding:12px 8px 4px}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
-  footer{display:flex;gap:6px;padding:10px 18px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
-  footer button{flex:1;padding:7px 8px;font-size:12px}
-  .toggle{position:fixed;top:16px;left:16px;z-index:6;display:none}
+  footer{display:flex;gap:6px;padding:10px 18px 14px;border-top:1px solid var(--line)}
+  footer button{flex:1;padding:8px;font-size:12px}
+  .err{color:var(--danger);font-size:12px}
+  .err:empty{display:none}
+
+  .toggle{position:fixed;top:16px;left:16px;z-index:6;display:none;background:var(--panel)}
   .panel.hidden ~ .toggle{display:block}
-  .hide-btn{position:absolute;top:16px;right:14px;padding:4px 9px}
   .ctrls{position:fixed;right:16px;bottom:16px;z-index:5;display:flex;gap:6px}
-  .ctrls button{background:var(--panel);backdrop-filter:blur(10px)}
-  .err{color:var(--danger);font-size:12px;min-height:0}
+  .ctrls button{background:var(--panel);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+
+  /* ---------- Mobile: bottom sheet ---------- */
   @media (max-width:640px){
-    .panel{top:auto;left:8px;right:8px;bottom:8px;width:auto;height:58vh}
-    .panel.hidden{transform:translateY(calc(100% + 20px))}
+    .panel{top:auto;left:0;right:0;bottom:0;width:auto;height:88dvh;border-radius:18px 18px 0 0;border-bottom:0;
+      transform:translateY(var(--sheet-y,50%));transition:transform .32s cubic-bezier(.2,.8,.2,1);padding-bottom:var(--safe-b)}
+    .panel.dragging{transition:none}
+    .panel.hidden{transform:translateY(var(--sheet-y,50%))}
+    .sheet-top{touch-action:none;cursor:grab}
+    .grip{display:block;width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.25);margin:8px auto 0}
+    header{padding:10px 16px 10px}
+    h1{font-size:19px}
+    #hideBtn{display:none}
+    #addToggle{display:block;background:var(--accent);color:#1a1205;border:0;font-weight:700;padding:7px 12px;font-size:14px}
+    .panel.adding #addToggle{background:rgba(255,255,255,.08);color:var(--text)}
+    .sel{margin:0 16px 10px}
+    .stats{padding:0 16px 12px;gap:6px}
+    .stat{padding:7px 2px}
+    .stat b{font-size:15px}
+    .stat small{font-size:9px}
+    form{display:none;padding:12px 16px}
+    .panel.adding form{display:grid}
+    input{font-size:16px;height:42px} /* 16px = без автозума iOS */
+    .list{padding:4px 8px}
+    .flight{padding:11px 8px}
+    footer{padding:10px 16px 12px}
+    .ctrls{top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;bottom:auto}
+    .ctrls button{padding:8px 11px}
   }
 </style>
 </head>
@@ -70,15 +119,23 @@
 <div id="globe"></div>
 
 <aside class="panel" id="panel">
-  <header>
-    <h1>Мои <span>перелёты</span></h1>
-    <button class="hide-btn" id="hideBtn" title="Скрыть панель">✕</button>
-  </header>
-  <div class="stats">
-    <div class="stat"><b id="sFlights">0</b><small>рейсов</small></div>
-    <div class="stat"><b id="sKm">0</b><small>км</small></div>
-    <div class="stat"><b id="sAirports">0</b><small>аэроп.</small></div>
-    <div class="stat"><b id="sCountries">0</b><small>стран</small></div>
+  <div class="sheet-top" id="sheetTop">
+    <div class="grip"></div>
+    <header>
+      <h1>Мои <span>перелёты</span></h1>
+      <button class="icon-btn" id="addToggle" type="button">+ Добавить</button>
+      <button class="icon-btn" id="hideBtn" type="button" title="Скрыть панель">✕</button>
+    </header>
+    <div class="sel" id="sel" hidden>
+      <div><div class="route" id="selRoute"></div><div class="meta" id="selMeta"></div></div>
+      <button id="selClose" type="button" title="Снять выделение">×</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sFlights">0</b><small>рейсов</small></div>
+      <div class="stat"><b id="sKm">0</b><small>км</small></div>
+      <div class="stat"><b id="sAirports">0</b><small>аэроп.</small></div>
+      <div class="stat"><b id="sCountries">0</b><small>стран</small></div>
+    </div>
   </div>
   <form id="form" autocomplete="off">
     <div class="row">
@@ -86,24 +143,24 @@
       <div class="field"><label>Куда</label><input id="to" placeholder="IST, London…" required><div class="sugg"></div></div>
     </div>
     <div class="row">
-      <div><label>Дата</label><input id="date" type="date"></div>
-      <div><label>Авиакомпания / рейс</label><input id="airline" placeholder="LO 123"></div>
+      <div class="field"><label>Дата</label><input id="date" type="date"></div>
+      <div class="field"><label>Авиакомпания / рейс</label><input id="airline" placeholder="LO 123"></div>
     </div>
     <div class="err" id="err"></div>
     <button class="primary" type="submit">Добавить перелёт</button>
   </form>
   <div class="list" id="list"></div>
   <footer>
-    <button id="exportBtn">Экспорт</button>
-    <button id="importBtn">Импорт</button>
-    <button id="clearBtn">Очистить</button>
-    <input type="file" id="importFile" accept=".json" hidden>
+    <button id="exportBtn" type="button">Экспорт</button>
+    <button id="importBtn" type="button">Импорт</button>
+    <button id="clearBtn" type="button">Очистить</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
   </footer>
 </aside>
 <button class="toggle" id="showBtn">☰ Перелёты</button>
 
 <div class="ctrls">
-  <button id="rotateBtn">⟳ Вращение</button>
+  <button id="rotateBtn" type="button">⟳ Вращение</button>
 </div>
 
 <script src="lib/globe.gl.min.js"></script>
@@ -112,47 +169,79 @@ const KEY = 'flights.v1';
 let AIRPORTS = [], BY_IATA = {};
 let flights = load();
 let selected = null;
+const isMobile = () => matchMedia('(max-width:640px)').matches;
 
 function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(flights)); }catch(e){ alert('Не удалось сохранить в localStorage'); } }
 
 // ---------- Globe ----------
-const globe = Globe()(document.getElementById('globe'))
+const BASE_ALT = 2.2;
+let zoomK = 1;
+const globe = Globe({ rendererConfig:{ antialias:true, alpha:false } })(document.getElementById('globe'))
   .globeImageUrl('img/earth-night.jpg')
   .bumpImageUrl('img/earth-topology.png')
   .backgroundImageUrl('img/night-sky.png')
   .atmosphereColor('#5ad1ff').atmosphereAltitude(0.18)
   .arcStartLat(d=>d.a.lat).arcStartLng(d=>d.a.lon).arcEndLat(d=>d.b.lat).arcEndLng(d=>d.b.lon)
-  .arcColor(d=> d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.9)','rgba(90,209,255,0.9)'])
-  .arcStroke(d=> d.id===selected ? 1.1 : 0.55)
+  // arcStroke(null) → линия толщиной 1px, не утолщается при приближении
+  .arcStroke(null)
+  .arcColor(d=> selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
+                : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)'])
   .arcAltitudeAutoScale(0.3)
   .arcDashLength(0.5).arcDashGap(0.15).arcDashAnimateTime(4000)
-  .arcLabel(d=>`<b>${d.a.iata} → ${d.b.iata}</b><br>${d.a.city} → ${d.b.city}<br>${fmtKm(d.km)} км${d.date?'<br>'+d.date:''}${d.airline?' · '+esc(d.airline):''}`)
-  .pointLat('lat').pointLng('lon').pointColor(()=> '#ffb347').pointAltitude(0.005).pointRadius(d=>0.18+Math.min(d.n,20)*0.02)
+  .arcLabel(d=>`<b>${d.a.iata} → ${d.b.iata}</b><br>${esc(d.a.city)} → ${esc(d.b.city)}<br>${fmtKm(d.km)} км${d.date?'<br>'+d.date:''}${d.airline?' · '+esc(d.airline):''}`)
+  .pointLat('lat').pointLng('lon').pointColor(()=> '#ffb347').pointAltitude(0.002)
+  .pointRadius(d=>(0.16+Math.min(d.n,20)*0.015)*zoomK).pointResolution(12)
   .pointLabel(d=>`<b>${d.iata}</b> ${esc(d.name)}<br>${esc(d.city)}, ${d.country} · ${d.n} рейс(ов)`)
-  .labelLat('lat').labelLng('lon').labelText('iata').labelSize(0.45).labelDotRadius(0)
-  .labelColor(()=> 'rgba(255,255,255,0.8)').labelAltitude(0.01).labelResolution(2)
-  .onArcClick(d=>{ selected = d.id; render(); focusFlight(d); });
+  .labelLat('lat').labelLng('lon').labelText('iata').labelSize(()=>0.42*Math.max(zoomK,0.2)).labelDotRadius(0)
+  .labelColor(()=> 'rgba(255,255,255,0.8)').labelAltitude(0.004).labelResolution(2)
+  .onArcClick(d=> selectFlight(d.id))
+  .onZoom(pov=>{
+    // точки и подписи уменьшаются при приближении, чтобы оставаться аккуратными
+    const k = Math.max(0.06, Math.min(1, pov.altitude / BASE_ALT));
+    if(Math.abs(k-zoomK)/zoomK > 0.08){ zoomK = k; scheduleZoomRefresh(); }
+  });
+
+let zoomRaf = 0;
+function scheduleZoomRefresh(){
+  if(zoomRaf) return;
+  zoomRaf = requestAnimationFrame(()=>{
+    zoomRaf=0;
+    const k = zoomK;
+    globe.pointRadius(d=>(0.16+Math.min(d.n,20)*0.015)*k).labelSize(()=>0.42*Math.max(k,0.2));
+  });
+}
 
 globe.controls().autoRotate = true;
 globe.controls().autoRotateSpeed = 0.35;
-globe.pointOfView({lat:52, lng:21, altitude:2.2});
-window.addEventListener('resize', ()=> globe.width(innerWidth).height(innerHeight));
+globe.pointOfView({lat:52, lng:21, altitude:BASE_ALT});
 
 // ---------- Helpers ----------
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtKm(n){ return Math.round(n).toLocaleString('ru-RU'); }
+function fmtDate(s){ if(!s) return ''; const [y,m,d]=s.split('-'); return `${d}.${m}.${y}`; }
 function dist(a,b){
   const R=6371, r=x=>x*Math.PI/180;
   const dLat=r(b.lat-a.lat), dLon=r(b.lon-a.lon);
   const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
+function midLng(a,b){ let d=b-a; if(d>180)d-=360; if(d<-180)d+=360; return a+d/2; }
 function focusFlight(d){
   globe.controls().autoRotate=false; rotBtnUpdate();
-  globe.pointOfView({lat:(d.a.lat+d.b.lat)/2, lng:midLng(d.a.lon,d.b.lon), altitude: Math.min(2.5, 0.6+d.km/6000)}, 1200);
+  globe.pointOfView({lat:(d.a.lat+d.b.lat)/2, lng:midLng(d.a.lon,d.b.lon), altitude: Math.min(2.5, 0.5+d.km/5500)}, 1200);
 }
-function midLng(a,b){ let d=b-a; if(d>180)d-=360; if(d<-180)d+=360; return a+d/2; }
+
+// ---------- Selection ----------
+function selectFlight(id){
+  selected = id;
+  render();
+  const d = globe.arcsData().find(a=>a.id===id);
+  if(!d) return;
+  if(isMobile()) setSheet('peek');
+  focusFlight(d);
+}
+document.getElementById('selClose').onclick = e=>{ e.stopPropagation(); selected=null; render(); };
 
 // ---------- Render ----------
 function render(){
@@ -160,40 +249,56 @@ function render(){
   for(const f of flights){
     const a=BY_IATA[f.from], b=BY_IATA[f.to];
     if(!a||!b) continue;
-    const km = dist(a,b);
-    arcs.push({...f, a, b, km});
+    arcs.push({...f, a, b, km: dist(a,b)});
     for(const x of [a,b]) used[x.iata] = (used[x.iata]||0)+1;
   }
   const pts = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
   globe.arcsData(arcs).pointsData(pts).labelsData(pts);
 
+  const total = arcs.reduce((s,a)=>s+a.km,0);
   document.getElementById('sFlights').textContent = arcs.length;
-  document.getElementById('sKm').textContent = arcs.reduce((s,a)=>s+a.km,0) >= 100000
-    ? Math.round(arcs.reduce((s,a)=>s+a.km,0)/1000)+'k' : fmtKm(arcs.reduce((s,a)=>s+a.km,0));
+  document.getElementById('sKm').textContent = total >= 100000 ? Math.round(total/1000)+'k' : fmtKm(total);
   document.getElementById('sAirports').textContent = pts.length;
   document.getElementById('sCountries').textContent = new Set(pts.map(p=>p.country)).size;
 
+  // карточка выбранного перелёта
+  const s = arcs.find(a=>a.id===selected), sel = document.getElementById('sel');
+  if(s){
+    sel.hidden = false;
+    document.getElementById('selRoute').innerHTML = `${s.a.iata}<i>→</i>${s.b.iata}`;
+    document.getElementById('selMeta').textContent = `${s.a.city} → ${s.b.city} · ${fmtKm(s.km)} км${s.date?' · '+fmtDate(s.date):''}${s.airline?' · '+s.airline:''}`;
+  } else { sel.hidden = true; if(selected!=null) selected=null; }
+  updatePeek();
+
   const list = document.getElementById('list');
-  if(!arcs.length){ list.innerHTML = '<div class="empty">Пока нет перелётов.<br>Добавьте первый — он появится дугой на глобусе.</div>'; return; }
+  if(!arcs.length){ list.innerHTML = '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на глобусе.</div>'; return; }
   const sorted = [...arcs].sort((x,y)=> (y.date||'').localeCompare(x.date||'') || y.id-x.id);
-  list.innerHTML = sorted.map(f=>`
-    <div class="flight" data-id="${f.id}" style="${f.id===selected?'background:rgba(255,179,71,.12)':''}">
-      <div>
+  let lastYear = null, html = '';
+  for(const f of sorted){
+    const y = f.date ? f.date.slice(0,4) : 'Без даты';
+    if(y!==lastYear){ html += `<div class="year">${y}</div>`; lastYear=y; }
+    html += `
+    <div class="flight${f.id===selected?' active':''}" data-id="${f.id}">
+      <div class="info">
         <div class="route">${f.a.iata}<i>→</i>${f.b.iata}</div>
-        <div class="meta">${esc(f.a.city)} → ${esc(f.b.city)} · ${fmtKm(f.km)} км${f.date?' · '+f.date:''}${f.airline?' · '+esc(f.airline):''}</div>
+        <div class="meta">${esc(f.a.city)} → ${esc(f.b.city)} · ${fmtKm(f.km)} км${f.date?' · '+fmtDate(f.date):''}${f.airline?' · '+esc(f.airline):''}</div>
       </div>
-      <button class="del" data-del="${f.id}" title="Удалить">×</button>
-    </div>`).join('');
+      <button class="del" data-del="${f.id}" title="Удалить" type="button">×</button>
+    </div>`;
+  }
+  list.innerHTML = html;
 }
 
 document.getElementById('list').addEventListener('click', e=>{
   const del = e.target.closest('[data-del]');
-  if(del){ e.stopPropagation(); flights = flights.filter(f=>f.id!=del.dataset.del); save(); render(); return; }
-  const row = e.target.closest('.flight');
-  if(row){
-    selected = +row.dataset.id; render();
-    const f = globe.arcsData().find(a=>a.id===selected); if(f) focusFlight(f);
+  if(del){
+    e.stopPropagation();
+    const f = flights.find(f=>f.id==del.dataset.del);
+    if(f && confirm(`Удалить перелёт ${f.from} → ${f.to}?`)){ flights = flights.filter(x=>x!==f); save(); render(); }
+    return;
   }
+  const row = e.target.closest('.flight');
+  if(row) selectFlight(+row.dataset.id);
 });
 
 // ---------- Autocomplete ----------
@@ -203,7 +308,7 @@ function search(q){
   for(const a of AIRPORTS){
     if(a.iata.toLowerCase()===q || a.icao.toLowerCase()===q) exact.push(a);
     else if(a.city.toLowerCase().startsWith(q) || a.name.toLowerCase().startsWith(q)) start.push(a);
-    else if(a.city.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)) rest.push(a);
+    else if(rest.length<20 && (a.city.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))) rest.push(a);
     if(exact.length+start.length > 30) break;
   }
   return [...exact,...start,...rest].slice(0,12);
@@ -227,8 +332,8 @@ function setupAC(input){
     } else if(e.key==='Enter'){ e.preventDefault(); pick(items[Math.max(idx,0)]); }
     else if(e.key==='Escape') close();
   });
-  box.addEventListener('mousedown', e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); pick(items[d.dataset.i]); } });
-  input.addEventListener('blur', ()=> setTimeout(close,100));
+  box.addEventListener('pointerdown', e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); pick(items[d.dataset.i]); } });
+  input.addEventListener('blur', ()=> setTimeout(close,150));
 }
 function resolve(input){
   if(input.dataset.iata) return input.dataset.iata;
@@ -246,16 +351,20 @@ document.getElementById('form').addEventListener('submit', e=>{
   if(from===to){ err.textContent='Аэропорты вылета и прилёта совпадают.'; return; }
   err.textContent='';
   const f = { id: Date.now(), from, to, date: document.getElementById('date').value, airline: document.getElementById('airline').value.trim() };
-  flights.push(f); save(); selected=f.id; render();
-  const arc = globe.arcsData().find(a=>a.id===f.id); if(arc) focusFlight(arc);
-  fromEl.value = toEl.value; fromEl.dataset.iata = to; toEl.value=''; toEl.dataset.iata=''; document.getElementById('airline').value=''; toEl.focus();
+  flights.push(f); save();
+  // следующий перелёт начинается там, где закончился этот
+  fromEl.value = toEl.value; fromEl.dataset.iata = to; toEl.value=''; toEl.dataset.iata=''; document.getElementById('airline').value='';
+  if(isMobile()){ document.activeElement?.blur(); panel.classList.remove('adding'); }
+  else toEl.focus();
+  selectFlight(f.id);
 });
 
 // ---------- Export / import / clear ----------
 document.getElementById('exportBtn').onclick = ()=>{
   const blob = new Blob([JSON.stringify(flights,null,2)],{type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `flights-${new Date().toISOString().slice(0,10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+  a.download = `flights-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 };
 document.getElementById('importBtn').onclick = ()=> document.getElementById('importFile').click();
 document.getElementById('importFile').onchange = async e=>{
@@ -273,10 +382,10 @@ document.getElementById('importFile').onchange = async e=>{
   e.target.value='';
 };
 document.getElementById('clearBtn').onclick = ()=>{
-  if(flights.length && confirm('Удалить все перелёты? Совет: сначала сделайте экспорт.')){ flights=[]; save(); render(); }
+  if(flights.length && confirm('Удалить все перелёты? Совет: сначала сделайте экспорт.')){ flights=[]; selected=null; save(); render(); }
 };
 
-// ---------- UI toggles ----------
+// ---------- Desktop panel toggle ----------
 const panel=document.getElementById('panel');
 document.getElementById('hideBtn').onclick=()=>panel.classList.add('hidden');
 document.getElementById('showBtn').onclick=()=>panel.classList.remove('hidden');
@@ -285,12 +394,78 @@ function rotBtnUpdate(){ rotBtn.style.color = globe.controls().autoRotate ? 'var
 rotBtn.onclick=()=>{ globe.controls().autoRotate=!globe.controls().autoRotate; rotBtnUpdate(); };
 rotBtnUpdate();
 
+// ---------- Mobile bottom sheet ----------
+// состояния: peek — видна только шапка и статистика, half — список, full — почти весь экран
+let sheet = 'half';
+const sheetTop = document.getElementById('sheetTop');
+function sheetH(){ return panel.getBoundingClientRect().height; }
+function peekH(){ return sheetTop.offsetHeight + 4; }
+function visibleFor(state){
+  const H = sheetH();
+  if(state==='peek') return peekH();
+  if(state==='full') return H;
+  return Math.min(H, Math.max(peekH()+180, innerHeight*0.5));
+}
+function applySheet(animateGlobe=true){
+  if(!isMobile()){ panel.style.removeProperty('--sheet-y'); sizeGlobe(innerHeight); return; }
+  const vis = visibleFor(sheet);
+  panel.style.setProperty('--sheet-y', (sheetH()-vis)+'px');
+  // глобус занимает видимую часть экрана над шторкой, чтобы маршрут был по центру
+  sizeGlobe(innerHeight - (sheet==='full' ? visibleFor('half') : vis) + 16);
+}
+function setSheet(state){ sheet = state; applySheet(); }
+function updatePeek(){ if(isMobile() && sheet==='peek') applySheet(); }
+function sizeGlobe(h){
+  h = Math.max(200, Math.round(h));
+  document.getElementById('globe').style.height = h+'px';
+  globe.width(innerWidth).height(h);
+}
+
+// перетаскивание шторки
+let drag = null;
+sheetTop.addEventListener('pointerdown', e=>{
+  if(!isMobile() || e.target.closest('button')) return;
+  drag = { y0:e.clientY, start: sheetH()-visibleFor(sheet), moved:false };
+  panel.classList.add('dragging'); sheetTop.setPointerCapture(e.pointerId);
+});
+sheetTop.addEventListener('pointermove', e=>{
+  if(!drag) return;
+  const dy = e.clientY - drag.y0; if(Math.abs(dy)>4) drag.moved = true;
+  const y = Math.min(sheetH()-peekH(), Math.max(0, drag.start + dy));
+  panel.style.setProperty('--sheet-y', y+'px');
+});
+function endDrag(e){
+  if(!drag) return;
+  panel.classList.remove('dragging');
+  const dy = e.clientY - drag.y0, moved = drag.moved; drag = null;
+  const order = ['peek','half','full'];
+  let i = order.indexOf(sheet);
+  if(!moved) i = sheet==='peek' ? 1 : 0;           // тап по шапке: свернуть/развернуть
+  else if(dy < -40) i = Math.min(2, i+1);
+  else if(dy > 40) i = Math.max(0, i-1);
+  if(order[i]==='peek') panel.classList.remove('adding');
+  setSheet(order[i]);
+}
+sheetTop.addEventListener('pointerup', endDrag);
+sheetTop.addEventListener('pointercancel', endDrag);
+
+document.getElementById('addToggle').onclick = ()=>{
+  const on = !panel.classList.contains('adding');
+  panel.classList.toggle('adding', on);
+  setSheet(on ? 'full' : 'half');
+  if(on) setTimeout(()=>document.getElementById(document.getElementById('from').value ? 'to' : 'from').focus(), 320);
+};
+
+addEventListener('resize', ()=> applySheet());
+
 // ---------- Boot ----------
+applySheet();
 fetch('airports.json').then(r=>r.json()).then(rows=>{
   AIRPORTS = rows.map(([iata,icao,name,city,country,lat,lon])=>({iata,icao,name,city,country,lat,lon}));
   for(const a of AIRPORTS) if(!BY_IATA[a.iata]) BY_IATA[a.iata]=a;
   setupAC(document.getElementById('from')); setupAC(document.getElementById('to'));
   render();
+  if(isMobile() && !flights.length){ panel.classList.add('adding'); setSheet('full'); }
 }).catch(()=>{
   document.getElementById('list').innerHTML='<div class="empty">Не удалось загрузить airports.json.<br>Откройте сайт через веб-сервер (GitHub Pages), а не двойным кликом по файлу.</div>';
 });
