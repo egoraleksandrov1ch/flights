@@ -160,6 +160,7 @@
 <button class="toggle" id="showBtn">☰ Перелёты</button>
 
 <div class="ctrls">
+  <button id="mapBtn" type="button">☀ День</button>
   <button id="rotateBtn" type="button">⟳ Вращение</button>
 </div>
 
@@ -175,10 +176,13 @@ function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(flights)); }catch(e){ alert('Не удалось сохранить в localStorage'); } }
 
 // ---------- Globe ----------
+const MAPS = { night:'img/earth-night.jpg', day:'img/earth-blue-marble.jpg' };
+let mapMode = (()=>{ try{ return localStorage.getItem('flights.map')==='day' ? 'day' : 'night'; }catch(e){ return 'night'; } })();
+function mapUrl(){ return MAPS[mapMode]; }
 const BASE_ALT = 2.2;
 let zoomK = 1;
 const globe = Globe({ rendererConfig:{ antialias:true, alpha:false } })(document.getElementById('globe'))
-  .globeImageUrl('img/earth-night.jpg')
+  .globeImageUrl(mapUrl())
   .bumpImageUrl('img/earth-topology.png')
   .backgroundImageUrl('img/night-sky.png')
   .atmosphereColor('#5ad1ff').atmosphereAltitude(0.18)
@@ -393,6 +397,14 @@ const rotBtn=document.getElementById('rotateBtn');
 function rotBtnUpdate(){ rotBtn.style.color = globe.controls().autoRotate ? 'var(--accent)' : ''; }
 rotBtn.onclick=()=>{ globe.controls().autoRotate=!globe.controls().autoRotate; rotBtnUpdate(); };
 rotBtnUpdate();
+const mapBtn=document.getElementById('mapBtn');
+function mapBtnUpdate(){ mapBtn.textContent = mapMode==='day' ? '☾ Ночь' : '☀ День'; }
+mapBtn.onclick=()=>{
+  mapMode = mapMode==='day' ? 'night' : 'day';
+  try{ localStorage.setItem('flights.map', mapMode); }catch(e){}
+  globe.globeImageUrl(mapUrl()); mapBtnUpdate();
+};
+mapBtnUpdate();
 
 // ---------- Mobile bottom sheet ----------
 // состояния: peek — видна только шапка и статистика, half — список, full — почти весь экран
