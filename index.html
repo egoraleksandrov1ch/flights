@@ -474,8 +474,8 @@ function styleOverlay(){
   // страны: на странице Country видны только они, перелёты и поездки скрыты
   const onC = page===2;
   for(const l of ['country-fill','country-flags']) map.setLayoutProperty(l,'visibility', onC ? 'visible' : 'none');
-  // на странице Road перелёты скрыты, на странице Country скрыто всё, кроме стран
-  const hideFlights = page!==0 && (onC || page===1), hideTrips = onC;
+  // каждая страница показывает только своё: Fly — перелёты, Road — поездки, Country — страны
+  const hideFlights = page!==0, hideTrips = page!==1;
   for(const l of ['flights-base','flights-up','flights-sel','flights-pulse','flights-hit','airports','airport-labels'])
     if(map.getLayer(l)) map.setLayoutProperty(l,'visibility', hideFlights ? 'none' : 'visible');
   for(const l of ['trips-line','trips-up','trips-sel','trips-hit','trip-pts','trip-labels'])
@@ -607,7 +607,7 @@ function updateGlobe(){
   globe.arcColor(d=> d.up ? (d.id===selected ? ['#ffffff','#ffffff'] : selected==null ? ['rgba(170,178,195,0.8)','rgba(170,178,195,0.8)'] : ['rgba(170,178,195,0.3)','rgba(170,178,195,0.3)'])
                   : selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
                   : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)']);
-  const gF = page===0, gT = page!==2;
+  const gF = page===0, gT = page===1;
   globe.arcsData(gF?ARCS:[]).pointsData(gF?PTS:[]).labelsData(gF?PTS:[]);
   globe.pathsData(gT?TRIPS:[]).pathPoints('line').pathPointLat(p=>p[1]).pathPointLng(p=>p[0]).pathPointAlt(0.002)
     .pathStroke(null).pathTransitionDuration(0)
@@ -696,16 +696,19 @@ yearMenu.addEventListener('click', e=>{
 document.addEventListener('click', e=>{ if(!yearsEl.contains(e.target)) yearsEl.classList.remove('open'); });
 // показать все перелёты выбранного периода
 function fitAll(){
-  if(!ARCS.length && !TRIPS.length) return;
+  // только то, что видно на текущей странице
+  const A = page===0 ? ARCS : [], T = page===1 ? TRIPS : [];
+  const C = page===2 ? VISITED_FC.features.flatMap(f=>f.geometry.coordinates[0]) : [];
+  if(!A.length && !T.length && !C.length) return;
   rotating=false; rotBtnUpdate();
   if(view==='globe3d'){
     if(!globe) return;
-    const a = [...ARCS.flatMap(d=>[d.a,d.b]), ...TRIPS.flatMap(t=>[t.from,t.to])];
+    const a = [...A.flatMap(d=>[d.a,d.b]), ...T.flatMap(t=>[t.from,t.to]), ...C.map(([lon,lat])=>({lon,lat}))];
     const lat = a.reduce((s,p)=>s+p.lat,0)/a.length, lng = a.reduce((s,p)=>s+p.lon,0)/a.length;
     globe.pointOfView({lat, lng, altitude:2}, 1200); return;
   }
   if(!map) return;
-  const pts = [...ARCS.flatMap(d=>d.line), ...TRIPS.flatMap(t=>t.line)];
+  const pts = [...A.flatMap(d=>d.line), ...T.flatMap(t=>t.line), ...C];
   const lons = pts.map(c=>c[0]), lats = pts.map(c=>c[1]);
   map.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:6, duration:1200});
 }
