@@ -51,6 +51,7 @@
   .sel{margin:0 18px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,179,71,.12);border:1px solid rgba(255,179,71,.3);
     display:flex;align-items:center;gap:10px}
   .sel .route{font-family:"JetBrains Mono",monospace;font-size:15px}
+  .sel .route.plain{font-family:Inter,system-ui,sans-serif;font-weight:600}
   .sel .meta{color:var(--muted);font-size:12px;margin-top:2px}
   .sel button{margin-left:auto;background:none;border:0;color:var(--muted);font-size:18px;padding:2px 6px}
 
@@ -100,6 +101,24 @@
   footer{display:flex;gap:6px;padding:10px 18px 14px;border-top:1px solid var(--line)}
   footer button{flex:1;padding:8px;font-size:12px}
   .err{color:var(--danger);font-size:12px}
+  /* ---------- Страницы шторки ---------- */
+  .tabs{display:flex;gap:4px;margin:0 18px 12px;background:rgba(255,255,255,.04);border-radius:10px;padding:3px}
+  .tabs button{flex:1;border:0;background:none;padding:7px 4px;font-size:13px;border-radius:8px;color:var(--muted)}
+  .tabs button.on{background:rgba(255,255,255,.1);color:var(--text)}
+  .pages{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+  .track{flex:1;min-height:0;display:flex;width:300%;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+  .track.dragging{transition:none}
+  .page{width:33.3334%;min-width:0;display:flex;flex-direction:column;min-height:0}
+  .page .list{flex:1;min-height:0}
+  .modes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .modes button{padding:8px 2px;font-size:12px;white-space:nowrap}
+  .modes button.on{background:rgba(255,179,71,.18);border-color:rgba(255,179,71,.55)}
+  .mode-ico{font-size:19px;flex:none;width:28px;text-align:center}
+  .flight.trip .route,.flight.country .route{font-family:Inter,system-ui,sans-serif;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .flag{font-size:26px;flex:none;width:34px;text-align:center;line-height:1}
+  .flight.country .cnt{color:var(--muted);font-size:12px;flex:none;padding-right:6px}
+  .sugg .kind{margin-right:6px}
+  .panel.page-countries #addToggle{display:none!important}
   .err:empty{display:none}
 
   .toggle{position:fixed;top:16px;left:16px;z-index:6;display:none;background:var(--panel)}
@@ -160,6 +179,11 @@
     .ctrls{top:calc(var(--safe-t) + 12px);right:12px}
     .ctrls button{padding:8px 11px}
     .ctrls .lbl{display:none}
+    /* точки страниц вместо вкладок */
+    .tabs{margin:2px auto 8px;background:none;padding:0;gap:7px;justify-content:center;width:auto}
+    .tabs button{flex:none;width:7px;height:7px;padding:0;border-radius:4px;background:rgba(255,255,255,.25);font-size:0;transition:width .2s,background .2s}
+    .tabs button.on{background:var(--accent);width:20px}
+    .grip{margin-bottom:6px}
   }
 </style>
 </head>
@@ -171,22 +195,29 @@
   <div class="sheet-top" id="sheetTop">
     <div class="grip"></div>
     <header>
-      <h1>Мои <span>перелёты</span></h1>
+      <h1 id="title">Мои <span>перелёты</span></h1>
       <button class="icon-btn" id="shareBtn" type="button" title="Поделиться">⤴<span class="share-lbl"> Поделиться</span></button>
       <button class="icon-btn" id="addToggle" type="button">+ Добавить</button>
       <button class="icon-btn" id="hideBtn" type="button" title="Скрыть панель">✕</button>
     </header>
+    <div class="tabs" id="tabs">
+      <button type="button" data-page="0">✈ Перелёты</button>
+      <button type="button" data-page="1">🚆 Поездки</button>
+      <button type="button" data-page="2">🌍 Страны</button>
+    </div>
     <div class="sel" id="sel" hidden>
       <div><div class="route" id="selRoute"></div><div class="meta" id="selMeta"></div></div>
       <button id="selClose" type="button" title="Снять выделение">×</button>
     </div>
     <div class="stats">
-      <div class="stat"><b id="sFlights">0</b><small>рейсов</small></div>
-      <div class="stat"><b id="sKm">0</b><small>км</small></div>
-      <div class="stat"><b id="sAirports">0</b><small>аэроп.</small></div>
-      <div class="stat"><b id="sCountries">0</b><small>стран</small></div>
+      <div class="stat"><b id="sv0">0</b><small id="sl0">рейсов</small></div>
+      <div class="stat"><b id="sv1">0</b><small id="sl1">км</small></div>
+      <div class="stat"><b id="sv2">0</b><small id="sl2">аэроп.</small></div>
+      <div class="stat"><b id="sv3">0</b><small id="sl3">стран</small></div>
     </div>
   </div>
+  <div class="pages" id="pages"><div class="track" id="track">
+  <section class="page">
   <form id="form" autocomplete="off">
     <div class="row">
       <div class="field"><label>Откуда</label><input id="from" placeholder="WAW, Варшава…" required><div class="sugg"></div></div>
@@ -200,6 +231,32 @@
     <button class="primary" type="submit">Добавить перелёт</button>
   </form>
   <div class="list" id="list"></div>
+  </section>
+  <section class="page">
+  <form id="tripForm" autocomplete="off">
+    <div class="modes" id="modes">
+      <button type="button" data-mode="train" class="on">🚆 Поезд</button>
+      <button type="button" data-mode="bus">🚌 Автобус</button>
+      <button type="button" data-mode="car">🚗 Машина</button>
+      <button type="button" data-mode="ferry">⛴ Паром</button>
+    </div>
+    <div class="row">
+      <div class="field"><label>Откуда</label><input id="tFrom" placeholder="Город или вокзал" required><div class="sugg"></div></div>
+      <div class="field"><label>Куда</label><input id="tTo" placeholder="Город или вокзал" required><div class="sugg"></div></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Дата</label><input id="tDate" type="date"></div>
+      <div class="field"><label>Перевозчик / заметка</label><input id="tNote" placeholder="PKP Intercity"></div>
+    </div>
+    <div class="err" id="tErr"></div>
+    <button class="primary" type="submit" id="tSubmit">Добавить поездку</button>
+  </form>
+  <div class="list" id="tripList"></div>
+  </section>
+  <section class="page">
+  <div class="list" id="countryList"></div>
+  </section>
+  </div></div>
   <footer>
     <button id="exportBtn" type="button">Экспорт</button>
     <button id="importBtn" type="button">Импорт</button>
@@ -306,9 +363,9 @@ const SAT_STYLE = {
   ]
 };
 const VIEWS = {
-  map:    { label:'🗺 Карта',    style:'https://tiles.openfreemap.org/styles/liberty', line:'#ff5a1f', line2:'#1f7aff', selLine:'#d10068', dot:'#ff5a1f', text:'#1b1f2a', upLine:'#7d8696', upSel:'#4b5363', halo:'#ffffff' },
-  dark:   { label:'🌑 Тёмная',   style:'https://tiles.openfreemap.org/styles/dark',    line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#8a93a8', upSel:'#c9cfdb', halo:'#05070d' },
-  sat:    { label:'🛰 Спутник',  style:SAT_STYLE,                                       line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#c9cfdb', upSel:'#ffffff', halo:'#05070d' },
+  map:    { label:'🗺 Карта',    style:'https://tiles.openfreemap.org/styles/liberty', line:'#ff5a1f', line2:'#1f7aff', selLine:'#d10068', dot:'#ff5a1f', text:'#1b1f2a', upLine:'#7d8696', upSel:'#4b5363', country:'#ff5a1f', halo:'#ffffff' },
+  dark:   { label:'🌑 Тёмная',   style:'https://tiles.openfreemap.org/styles/dark',    line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#8a93a8', upSel:'#c9cfdb', country:'#ffb347', halo:'#05070d' },
+  sat:    { label:'🛰 Спутник',  style:SAT_STYLE,                                       line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#c9cfdb', upSel:'#ffffff', country:'#ffb347', halo:'#05070d' },
   globe3d:{ label:'🌍 3D глобус' }
 };
 let view = VIEWS[lsGet('flights.view','map')] ? lsGet('flights.view','map') : 'map';
@@ -333,13 +390,15 @@ function initMap(){
   // остановить вращение, когда пользователь трогает карту
   ['mousedown','touchstart','wheel','dragstart'].forEach(ev=> map.on(ev, ()=>{ if(rotating){ rotating=false; rotBtnUpdate(); } }));
   map.on('click','flights-hit', e=>{ const f=e.features[0]; if(f) selectFlight(Number(f.properties.id)); });
+  map.on('click','trips-hit', e=>{ const f=e.features[0]; if(f) selectTrip(Number(f.properties.id)); });
+  map.on('click','country-fill', e=>{ const f=e.features[0]; if(f && page===2) selectCountry(f.properties.iso); });
   map.on('click','airports', e=>{
     const p=e.features[0].properties, a=BY_IATA[p.iata]; if(!a) return;
     popup?.remove();
     popup = new maplibregl.Popup({offset:10,closeButton:true}).setLngLat([a.lon,a.lat])
       .setHTML(`<b>${a.iata}</b> · ${esc(a.name)}<br><span style="color:#8a93a8">${esc(a.city)}, ${a.country} · ${p.n} рейс(ов)</span>`).addTo(map);
   });
-  for(const l of ['flights-hit','airports']){
+  for(const l of ['flights-hit','airports','trips-hit']){
     map.on('mouseenter',l,()=>map.getCanvas().style.cursor='pointer');
     map.on('mouseleave',l,()=>map.getCanvas().style.cursor='');
   }
@@ -363,6 +422,30 @@ function addOverlay(){
   if(!map.getSource('flights')) map.addSource('flights',{type:'geojson',data:flightsGeo(),lineMetrics:true});
   if(!map.getSource('airports')) map.addSource('airports',{type:'geojson',data:airportsGeo()});
   const round = {'line-cap':'round','line-join':'round'};
+  // 0) посещённые страны (видны на странице «Страны»)
+  if(!map.getSource('countries')) map.addSource('countries',{type:'geojson',data:COUNTRY_GEO||EMPTY_FC});
+  map.addLayer({id:'country-fill',type:'fill',source:'countries',filter:['in',['get','iso'],['literal',[]]],
+    layout:{visibility:'none'},paint:{'fill-color':v.country,'fill-opacity':0.32}});
+  map.addLayer({id:'country-line',type:'line',source:'countries',filter:['in',['get','iso'],['literal',[]]],
+    layout:{visibility:'none'},paint:{'line-color':v.country,'line-width':1.2,'line-opacity':0.8}});
+  map.addLayer({id:'country-sel',type:'line',source:'countries',filter:['==',['get','iso'],''],
+    layout:{visibility:'none'},paint:{'line-color':v.selLine,'line-width':2.5}});
+  // 0b) наземные поездки: цвет по виду транспорта
+  if(!map.getSource('trips')) map.addSource('trips',{type:'geojson',data:tripsGeo()});
+  if(!map.getSource('trip-pts')) map.addSource('trip-pts',{type:'geojson',data:tripPtsGeo()});
+  const modeColor = ['match',['get','mode'],'train',MODES.train.color,'bus',MODES.bus.color,'car',MODES.car.color,MODES.ferry.color];
+  map.addLayer({id:'trips-line',type:'line',source:'trips',layout:round,filter:['!',['get','up']],
+    paint:{'line-width':2.6,'line-color':modeColor,'line-opacity':0.9}});
+  map.addLayer({id:'trips-up',type:'line',source:'trips',layout:{'line-join':'round'},filter:['get','up'],
+    paint:{'line-width':2,'line-color':v.upLine,'line-opacity':0.85,'line-dasharray':[2,2]}});
+  map.addLayer({id:'trips-sel',type:'line',source:'trips',layout:round,filter:['==',['get','id'],-1],
+    paint:{'line-width':4.5,'line-color':v.selLine}});
+  map.addLayer({id:'trips-hit',type:'line',source:'trips',paint:{'line-width':16,'line-opacity':0}});
+  map.addLayer({id:'trip-pts',type:'circle',source:'trip-pts',
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2,5,3.5,9,5],'circle-color':v.halo,'circle-stroke-width':2,'circle-stroke-color':modeColor}});
+  map.addLayer({id:'trip-labels',type:'symbol',source:'trip-pts',minzoom:4.5,
+    layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1],'text-anchor':'top','text-optional':true},
+    paint:{'text-color':v.text,'text-halo-color':v.halo,'text-halo-width':1.4}});
   // 1) тусклая подложка всего маршрута: градиент от вылета к прилёту
   map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,filter:['!',['get','up']],
     paint:{'line-width':1.6,'line-opacity':0.4,'line-gradient':['interpolate',['linear'],['line-progress'],0,v.line,1,v.line2]}});
@@ -386,6 +469,15 @@ function addOverlay(){
 }
 function styleOverlay(){
   if(!map || !map.getLayer('flights-base')) return;
+  // страны
+  const showC = page===2 ? 'visible' : 'none';
+  for(const l of ['country-fill','country-line','country-sel']) map.setLayoutProperty(l,'visibility',showC);
+  const inV = ['in',['get','iso'],['literal',VISITED]];
+  map.setFilter('country-fill', inV); map.setFilter('country-line', inV);
+  map.setFilter('country-sel', ['==',['get','iso'], selCountry||'']);
+  // поездки
+  map.setFilter('trips-sel', ['==',['get','id'], selTrip==null ? -1 : selTrip]);
+  map.setPaintProperty('trips-line','line-opacity', (selTrip!=null || selected!=null) ? 0.35 : 0.9);
   const hasSel = selected!=null;
   map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.18 : 0.4);
   map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
@@ -438,6 +530,9 @@ function airportsGeo(){
 }
 function updateMap(){
   if(!map || !mapReady) return;
+  map.getSource('trips')?.setData(tripsGeo());
+  map.getSource('trip-pts')?.setData(tripPtsGeo());
+  if(COUNTRY_GEO && map.getSource('countries') && !countriesOnMap){ map.getSource('countries').setData(COUNTRY_GEO); countriesOnMap = true; }
   map.getSource('flights')?.setData(flightsGeo());
   map.getSource('airports')?.setData(airportsGeo());
   styleOverlay();
@@ -448,7 +543,7 @@ function focusMap(d){
     {padding:40, maxZoom:6.5, duration:1200});
 }
 function setMapStyle(){
-  mapReady = false;
+  mapReady = false; countriesOnMap = false;
   popup?.remove();
   map.setStyle(VIEWS[view].style, {diff:false});
 }
@@ -506,6 +601,12 @@ function updateGlobe(){
                   : selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
                   : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)']);
   globe.arcsData(ARCS).pointsData(PTS).labelsData(PTS);
+  globe.pathsData(TRIPS).pathPoints('line').pathPointLat(p=>p[1]).pathPointLng(p=>p[0]).pathPointAlt(0.002)
+    .pathStroke(null).pathTransitionDuration(0)
+    .pathColor(d=> d.id===selTrip ? '#ffffff' : d.up ? 'rgba(170,178,195,0.8)' : MODES[d.mode]?.color || '#fff')
+    .pathDashLength(d=>d.up?0.02:1).pathDashGap(d=>d.up?0.015:0)
+    .pathLabel(d=>`${MODES[d.mode]?.ico||''} ${esc(d.from.name)} → ${esc(d.to.name)}<br>${fmtKm(d.km)} км${d.date?' · '+fmtDate(d.date):''}`)
+    .onPathClick(d=> selectTrip(d.id));
   globe.controls().autoRotate = rotating;
 }
 function focusGlobe(d){
@@ -554,26 +655,26 @@ function focusFlight(d){
   if(view==='globe3d'){ if(globe) focusGlobe(d); } else if(map) focusMap(d);
 }
 function selectFlight(id){
-  selected = id;
+  selected = id; selTrip = null; selCountry = null;
   render();
   const d = ARCS.find(a=>a.id===id);
   if(!d) return;
   if(isMobile()) setSheet('peek');
   focusFlight(d);
 }
-document.getElementById('selClose').onclick = e=>{ e.stopPropagation(); selected=null; render(); };
+document.getElementById('selClose').onclick = e=>{ e.stopPropagation(); selected=null; selTrip=null; selCountry=null; render(); };
 
 // ---------- Фильтр по годам ----------
 const yearsEl = document.getElementById('years'), yearMenu = document.getElementById('yearMenu');
 function yearLabel(y){ return y==='all' ? 'Всё время' : y==='none' ? 'Без даты' : y; }
 function renderYears(){
   const counts = {};
-  for(const f of flights) counts[yearOf(f)] = (counts[yearOf(f)]||0)+1;
+  for(const f of [...flights, ...trips]) counts[yearOf(f)] = (counts[yearOf(f)]||0)+1;
   if(yearFilter!=='all' && !counts[yearFilter]){ yearFilter='all'; lsSet('flights.year','all'); }
   const ys = Object.keys(counts).filter(y=>y!=='none').sort((a,b)=>b.localeCompare(a));
   if(counts.none) ys.push('none');
   const item = (y,n)=>`<button type="button" data-year="${y}" class="${y===yearFilter?'on':''}">${yearLabel(y)}<span class="cnt">${n}</span></button>`;
-  yearMenu.innerHTML = item('all', flights.length) + (ys.length?'<hr>':'') + ys.map(y=>item(y,counts[y])).join('');
+  yearMenu.innerHTML = item('all', flights.length + trips.length) + (ys.length?'<hr>':'') + ys.map(y=>item(y,counts[y])).join('');
   document.getElementById('yearBtn').textContent = '📅 ' + yearLabel(yearFilter);
 }
 document.getElementById('yearBtn').onclick = e=>{ e.stopPropagation(); layersEl.classList.remove('open'); yearsEl.classList.toggle('open'); };
@@ -581,22 +682,22 @@ yearMenu.addEventListener('click', e=>{
   const b = e.target.closest('[data-year]'); if(!b) return;
   yearFilter = b.dataset.year; lsSet('flights.year', yearFilter);
   yearsEl.classList.remove('open');
-  selected = null; render();
+  selected = null; selTrip = null; selCountry = null; render();
   fitAll();
 });
 document.addEventListener('click', e=>{ if(!yearsEl.contains(e.target)) yearsEl.classList.remove('open'); });
 // показать все перелёты выбранного периода
 function fitAll(){
-  if(!ARCS.length) return;
+  if(!ARCS.length && !TRIPS.length) return;
   rotating=false; rotBtnUpdate();
   if(view==='globe3d'){
     if(!globe) return;
-    const a = ARCS.flatMap(d=>[d.a,d.b]);
+    const a = [...ARCS.flatMap(d=>[d.a,d.b]), ...TRIPS.flatMap(t=>[t.from,t.to])];
     const lat = a.reduce((s,p)=>s+p.lat,0)/a.length, lng = a.reduce((s,p)=>s+p.lon,0)/a.length;
     globe.pointOfView({lat, lng, altitude:2}, 1200); return;
   }
   if(!map) return;
-  const pts = ARCS.flatMap(d=>d.line);
+  const pts = [...ARCS.flatMap(d=>d.line), ...TRIPS.flatMap(t=>t.line)];
   const lons = pts.map(c=>c[0]), lats = pts.map(c=>c[1]);
   map.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:6, duration:1200});
 }
@@ -629,20 +730,26 @@ function render(){
   ARCS = arcs;
   PTS = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
   if(selected!=null && !arcs.some(a=>a.id===selected)) selected=null;
-  updateMap(); updateGlobe();
 
   const total = done.reduce((s,a)=>s+a.km,0);
-  document.getElementById('sFlights').textContent = done.length;
-  document.getElementById('sKm').textContent = total >= 100000 ? Math.round(total/1000)+'k' : fmtKm(total);
-  document.getElementById('sAirports').textContent = doneAp.size;
-  document.getElementById('sCountries').textContent = new Set([...doneAp].map(k=>BY_IATA[k].country)).size;
+  FSTATS = [[done.length,'рейсов'], [kmShort(total),'км'], [doneAp.size,'аэроп.'], [new Set([...doneAp].map(k=>BY_IATA[k].country)).size,'стран']];
+  renderTrips();
+  renderCountries();
+  updateMap(); updateGlobe();
 
-  const s = arcs.find(a=>a.id===selected), sel = document.getElementById('sel');
+  const s = arcs.find(a=>a.id===selected), st = TRIPS.find(t=>t.id===selTrip), sel = document.getElementById('sel');
   if(s){
     sel.hidden = false;
+    document.getElementById('selRoute').classList.remove('plain');
     document.getElementById('selRoute').innerHTML = `${s.a.iata}<i>→</i>${s.b.iata}`;
     document.getElementById('selMeta').textContent = `${s.a.city} → ${s.b.city} · ${fmtKm(s.km)} км${s.date?' · '+fmtDate(s.date):''}${s.airline?' · '+s.airline:''}`;
+  } else if(st){
+    sel.hidden = false;
+    document.getElementById('selRoute').classList.add('plain');
+    document.getElementById('selRoute').textContent = `${MODES[st.mode].ico} ${st.from.name} → ${st.to.name}`;
+    document.getElementById('selMeta').textContent = `${MODES[st.mode].name} · ${st.line && st.routed ? '' : '≈'}${fmtKm(st.km)} км${st.date?' · '+fmtDate(st.date):''}${st.note?' · '+st.note:''}`;
   } else sel.hidden = true;
+  renderChrome();
   updatePeek();
 
   const list = document.getElementById('list');
@@ -740,7 +847,7 @@ document.getElementById('form').addEventListener('submit', e=>{
 
 // ---------- Export / import / clear ----------
 document.getElementById('exportBtn').onclick = ()=>{
-  const blob = new Blob([JSON.stringify(flights,null,2)],{type:'application/json'});
+  const blob = new Blob([JSON.stringify({version:2, flights, trips},null,2)],{type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `flights-${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
@@ -750,18 +857,26 @@ document.getElementById('importFile').onchange = async e=>{
   const file = e.target.files[0]; if(!file) return;
   try{
     const data = JSON.parse(await file.text());
-    if(!Array.isArray(data)) throw 0;
-    const clean = data.filter(f=>f && BY_IATA[f.from] && BY_IATA[f.to])
+    const inF = Array.isArray(data) ? data : Array.isArray(data?.flights) ? data.flights : null;
+    const inT = Array.isArray(data?.trips) ? data.trips : [];
+    if(!inF) throw 0;
+    const clean = inF.filter(f=>f && BY_IATA[f.from] && BY_IATA[f.to])
       .map((f,i)=>({id: Number(f.id)||Date.now()+i, from:f.from, to:f.to, date:String(f.date||''), airline:String(f.airline||'')}));
-    const replace = flights.length && confirm(`Найдено ${clean.length} перелётов.\nОК — заменить текущие, Отмена — добавить к ним.`);
-    const ids = new Set(flights.map(f=>f.id));
+    const okP = p => p && isFinite(p.lat) && isFinite(p.lon) && p.name;
+    const cleanT = inT.filter(t=>t && okP(t.from) && okP(t.to) && MODES[t.mode])
+      .map((t,i)=>({id:Number(t.id)||Date.now()+5000+i, mode:t.mode, from:t.from, to:t.to, date:String(t.date||''), note:String(t.note||''),
+                    km:+t.km||Math.round(dist(t.from,t.to)), line:Array.isArray(t.line)?t.line:null}));
+    const replace = (flights.length || trips.length) && confirm(`Найдено перелётов: ${clean.length}, поездок: ${cleanT.length}.\nОК — заменить текущие, Отмена — добавить к ним.`);
+    const ids = new Set(flights.map(f=>f.id)), tids = new Set(trips.map(t=>t.id));
     flights = replace ? clean : [...flights, ...clean.filter(f=>!ids.has(f.id))];
-    save(); render();
+    trips = replace ? cleanT : [...trips, ...cleanT.filter(t=>!tids.has(t.id))];
+    save(); saveTrips(); render();
   }catch(_){ alert('Не удалось прочитать файл'); }
   e.target.value='';
 };
 document.getElementById('clearBtn').onclick = ()=>{
-  if(flights.length && confirm('Удалить все перелёты? Совет: сначала сделайте экспорт.')){ flights=[]; selected=null; save(); render(); }
+  if(page===0 && flights.length && confirm('Удалить все перелёты? Совет: сначала сделайте экспорт.')){ flights=[]; selected=null; save(); render(); }
+  if(page===1 && trips.length && confirm('Удалить все поездки? Совет: сначала сделайте экспорт.')){ trips=[]; selTrip=null; saveTrips(); render(); }
 };
 
 // ---------- Panel / rotation ----------
@@ -821,7 +936,7 @@ function sizeGlobe(h){
 let drag = null;
 sheetTop.addEventListener('pointerdown', e=>{
   if(!isMobile() || e.target.closest('button')) return;
-  drag = { y0:e.clientY, start: sheetH()-visibleFor(sheet), moved:false };
+  drag = { x0:e.clientX, y0:e.clientY, start: sheetH()-visibleFor(sheet), moved:false };
   panel.classList.add('dragging'); sheetTop.setPointerCapture(e.pointerId);
 });
 sheetTop.addEventListener('pointermove', e=>{
@@ -833,7 +948,10 @@ sheetTop.addEventListener('pointermove', e=>{
 function endDrag(e){
   if(!drag) return;
   panel.classList.remove('dragging');
-  const dy = e.clientY - drag.y0, moved = drag.moved; drag = null;
+  const dy = e.clientY - drag.y0, dx = e.clientX - drag.x0, moved = drag.moved; drag = null;
+  if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)*1.3){   // свайп по шапке — смена страницы
+    applySheet(); setPage(dx < 0 ? Math.min(2, page+1) : Math.max(0, page-1)); return;
+  }
   const order = ['peek','half','full'];
   let i = order.indexOf(sheet);
   if(!moved) i = sheet==='peek' ? 1 : 0;
@@ -849,9 +967,344 @@ document.getElementById('addToggle').onclick = ()=>{
   const on = !panel.classList.contains('adding');
   panel.classList.toggle('adding', on);
   setSheet(on ? 'full' : 'half');
-  if(on) setTimeout(()=>document.getElementById(document.getElementById('from').value ? 'to' : 'from').focus(), 320);
+  if(on) setTimeout(()=>{
+    const [f,t] = page===1 ? ['tFrom','tTo'] : ['from','to'];
+    document.getElementById(document.getElementById(f).value ? t : f).focus();
+  }, 320);
 };
 addEventListener('resize', ()=> applySheet());
+
+// ======================================================================
+//  Поездки (поезд, автобус, машина, паром) и страны
+// ======================================================================
+const TKEY = 'trips.v1';
+let trips = (()=>{ try{ return JSON.parse(localStorage.getItem(TKEY)) || []; }catch(e){ return []; } })();
+function saveTrips(){ try{ localStorage.setItem(TKEY, JSON.stringify(trips)); }catch(e){ alert('Не удалось сохранить в localStorage'); } }
+const MODES = {
+  train:{ ico:'🚆', name:'Поезд',   color:'#a066ff' },
+  bus:  { ico:'🚌', name:'Автобус', color:'#22b573' },
+  car:  { ico:'🚗', name:'Машина',  color:'#14b8a6' },
+  ferry:{ ico:'⛴', name:'Паром',   color:'#3b8bff' },
+};
+const EMPTY_FC = {type:'FeatureCollection',features:[]};
+let TRIPS = [], selTrip = null, selCountry = null;
+let FSTATS = [], TSTATS = [], CSTATS = [];
+let COUNTRY_GEO = null, countryLoading = null, countriesOnMap = false, VISITED = [], COUNTRIES = [];
+let page = Math.max(0, Math.min(2, parseInt(lsGet('flights.page','0'))||0));
+
+function kmShort(n){ return n >= 100000 ? Math.round(n/1000)+'k' : fmtKm(n); }
+function pluralRu(n, one, few, many){ const m=n%10, h=n%100; return (m===1&&h!==11)?one:(m>=2&&m<=4&&(h<12||h>14))?few:many; }
+function flagEmoji(cc){ return cc && cc.length===2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)) : '🏳'; }
+const countryName = (()=>{ try{ const dn = new Intl.DisplayNames(['ru'],{type:'region'}); return cc=>{ try{ return dn.of(cc) || cc; }catch(e){ return cc; } }; }catch(e){ return cc=>cc; } })();
+
+// ---------- геоданные поездок ----------
+function tripsGeo(){
+  return {type:'FeatureCollection',features:TRIPS.map(t=>({type:'Feature',properties:{id:t.id, mode:t.mode, up:!!t.up},
+    geometry:{type:'LineString',coordinates:t.line}}))};
+}
+function tripPtsGeo(){
+  const seen = new Map();
+  for(const t of TRIPS) for(const p of [t.from,t.to]){
+    const k = p.lat.toFixed(4)+','+p.lon.toFixed(4);
+    if(!seen.has(k)) seen.set(k, {type:'Feature',properties:{name:p.name, mode:t.mode},geometry:{type:'Point',coordinates:[p.lon,p.lat]}});
+  }
+  return {type:'FeatureCollection',features:[...seen.values()]};
+}
+
+// ---------- список поездок ----------
+function renderTrips(){
+  TRIPS = trips.filter(t=> yearFilter==='all' || yearOf(t)===yearFilter)
+    .map(t=>({...t, up:isUpcoming(t), routed: !!t.line, line: t.line || greatCircle(t.from, t.to, 24)}));
+  if(selTrip!=null && !TRIPS.some(t=>t.id===selTrip)) selTrip = null;
+  const done = TRIPS.filter(t=>!t.up);
+  const places = new Set(done.flatMap(t=>[t.from.name, t.to.name]));
+  const ccs = new Set(done.flatMap(t=>[t.from.cc, t.to.cc]).filter(Boolean));
+  TSTATS = [[done.length,'поездок'], [kmShort(done.reduce((s,t)=>s+(t.km||0),0)),'км'], [places.size,'мест'], [ccs.size,'стран']];
+
+  const list = document.getElementById('tripList');
+  if(!TRIPS.length){
+    list.innerHTML = trips.length ? '<div class="empty">За этот период поездок нет.</div>'
+      : '<div class="empty">Пока нет поездок.<br>Нажмите «Добавить» — поезд, автобус, машина или паром.</div>';
+    return;
+  }
+  const upcoming = TRIPS.filter(t=>t.up).sort((x,y)=>x.date.localeCompare(y.date));
+  const past = TRIPS.filter(t=>!t.up).sort((x,y)=>(y.date||'').localeCompare(x.date||'') || y.id-x.id);
+  let lastYear = null, html = upcoming.length ? '<div class="year up">Предстоящие</div>' : '';
+  for(const t of [...upcoming, ...past]){
+    if(!t.up){ const y = t.date ? t.date.slice(0,4) : 'Без даты'; if(y!==lastYear){ html += `<div class="year">${y}</div>`; lastYear=y; } }
+    const m = MODES[t.mode] || MODES.train;
+    html += `
+    <div class="flight trip${t.id===selTrip?' active':''}${t.up?' upcoming':''}" data-tid="${t.id}">
+      <div class="mode-ico">${m.ico}</div>
+      <div class="info">
+        <div class="route">${esc(t.from.name)} → ${esc(t.to.name)}${t.up?`<span class="badge">${untilLabel(t.date)}</span>`:''}</div>
+        <div class="meta">${m.name} · ${t.routed?'':'≈'}${fmtKm(t.km||0)} км${t.date?' · '+fmtDate(t.date):''}${t.note?' · '+esc(t.note):''}</div>
+      </div>
+      <button class="del" data-tdel="${t.id}" title="Удалить" type="button">×</button>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+document.getElementById('tripList').addEventListener('click', e=>{
+  const del = e.target.closest('[data-tdel]');
+  if(del){
+    e.stopPropagation();
+    const t = trips.find(t=>t.id==del.dataset.tdel);
+    if(t && confirm(`Удалить поездку ${t.from.name} → ${t.to.name}?`)){ trips = trips.filter(x=>x!==t); saveTrips(); render(); }
+    return;
+  }
+  const row = e.target.closest('[data-tid]');
+  if(row) selectTrip(+row.dataset.tid);
+});
+function selectTrip(id){
+  selTrip = id; selected = null; selCountry = null;
+  render();
+  const t = TRIPS.find(x=>x.id===id); if(!t) return;
+  if(isMobile()) setSheet('peek');
+  rotating=false; rotBtnUpdate();
+  if(view==='globe3d'){ if(globe) globe.pointOfView({lat:(t.from.lat+t.to.lat)/2, lng:midLng(t.from.lon,t.to.lon), altitude:Math.min(2.2, 0.25+(t.km||100)/4000)}, 1200); return; }
+  const lons=t.line.map(c=>c[0]), lats=t.line.map(c=>c[1]);
+  map?.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:9, duration:1200});
+}
+
+// ---------- страны ----------
+function renderCountries(){
+  const m = {};
+  const add = (cc, date, place, arrival, byAir)=>{
+    if(!cc) return;
+    const c = m[cc] || (m[cc] = {cc, arrivals:0, places:new Set(), first:null, last:null, air:false, ground:false});
+    if(arrival) c.arrivals++;
+    c.places.add(place);
+    if(date){ if(!c.first || date<c.first) c.first=date; if(!c.last || date>c.last) c.last=date; }
+    if(byAir) c.air = true; else c.ground = true;
+  };
+  for(const a of ARCS) if(!a.up){ add(a.a.country, a.date, a.a.iata, false, true); add(a.b.country, a.date, a.b.iata, true, true); }
+  for(const t of TRIPS) if(!t.up){ add(t.from.cc, t.date, t.from.name, false, false); add(t.to.cc, t.date, t.to.name, true, false); }
+  COUNTRIES = Object.values(m).sort((x,y)=>(y.last||'').localeCompare(x.last||'') || y.arrivals-x.arrivals);
+  VISITED = COUNTRIES.map(c=>c.cc);
+  if(selCountry && !VISITED.includes(selCountry)) selCountry = null;
+  CSTATS = [[COUNTRIES.length, pluralRu(COUNTRIES.length,'страна','страны','стран')],
+            [Math.round(COUNTRIES.length/195*100)+'%', 'мира'],
+            [COUNTRIES.filter(c=>c.air).length, 'самолётом'],
+            [COUNTRIES.filter(c=>c.ground).length, 'наземно']];
+  const list = document.getElementById('countryList');
+  if(!COUNTRIES.length){ list.innerHTML = '<div class="empty">Страны появятся, когда вы добавите перелёты или поездки.</div>'; return; }
+  list.innerHTML = COUNTRIES.map(c=>{
+    const pl = [...c.places], more = pl.length>4 ? ` +${pl.length-4}` : '';
+    const how = [c.air?'✈':'', c.ground?'🚆':''].join('');
+    return `
+    <div class="flight country${c.cc===selCountry?' active':''}" data-cc="${c.cc}">
+      <div class="flag">${flagEmoji(c.cc)}</div>
+      <div class="info">
+        <div class="route">${esc(countryName(c.cc))}</div>
+        <div class="meta">${how} ${esc(pl.slice(0,4).join(', '))}${more}${c.last?' · '+fmtDate(c.last):''}</div>
+      </div>
+      <div class="cnt">${c.arrivals ? c.arrivals+'×' : ''}</div>
+    </div>`;
+  }).join('');
+}
+document.getElementById('countryList').addEventListener('click', e=>{
+  const row = e.target.closest('[data-cc]'); if(row) selectCountry(row.dataset.cc);
+});
+function selectCountry(cc){
+  selCountry = cc; selected = null; selTrip = null;
+  render();
+  if(isMobile()) setSheet('peek');
+  rotating=false; rotBtnUpdate();
+  // границы страны: по контуру, если он загружен, иначе по посещённым точкам
+  let pts = [];
+  const f = COUNTRY_GEO?.features.find(f=>f.properties.iso===cc);
+  if(f){
+    const polys = f.geometry.type==='Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    // самый большой полигон — материковая часть (без далёких островов)
+    let best = null, bestN = 0;
+    for(const p of polys){ if(p[0].length > bestN){ bestN = p[0].length; best = p; } }
+    pts = best ? best[0] : [];
+  }
+  if(!pts.length){
+    for(const a of ARCS){ if(a.a.country===cc) pts.push([a.a.lon,a.a.lat]); if(a.b.country===cc) pts.push([a.b.lon,a.b.lat]); }
+    for(const t of TRIPS){ if(t.from.cc===cc) pts.push([t.from.lon,t.from.lat]); if(t.to.cc===cc) pts.push([t.to.lon,t.to.lat]); }
+  }
+  if(!pts.length) return;
+  const lons=pts.map(c=>c[0]), lats=pts.map(c=>c[1]);
+  if(view==='globe3d'){ if(globe) globe.pointOfView({lat:(Math.min(...lats)+Math.max(...lats))/2, lng:(Math.min(...lons)+Math.max(...lons))/2, altitude:0.8}, 1200); return; }
+  map?.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:6, duration:1200});
+}
+function loadScriptOnce(src){
+  return new Promise((res,rej)=>{
+    if(window.topojson) return res();
+    const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s);
+  });
+}
+function loadCountries(){
+  if(COUNTRY_GEO) return Promise.resolve();
+  if(!countryLoading) countryLoading = (async ()=>{
+    try{
+      await loadScriptOnce('lib/topojson-client.min.js');
+      const topo = await fetch('lib/countries-50m.json').then(r=>r.json());
+      const fc = topojson.feature(topo, topo.objects.countries);
+      fc.features.forEach(f=>{ f.properties = {iso: f.id}; });
+      COUNTRY_GEO = fc; countriesOnMap = false;
+      updateMap();
+    }catch(e){ countryLoading = null; }
+  })();
+  return countryLoading;
+}
+
+// ---------- страницы шторки ----------
+const PAGE_TITLES = ['Мои <span>перелёты</span>', 'Мои <span>поездки</span>', 'Мои <span>страны</span>'];
+const track = document.getElementById('track'), pagesEl = document.getElementById('pages');
+function renderChrome(){
+  document.getElementById('title').innerHTML = PAGE_TITLES[page];
+  document.querySelectorAll('#tabs [data-page]').forEach(b=>b.classList.toggle('on', +b.dataset.page===page));
+  panel.classList.toggle('page-countries', page===2);
+  const st = page===0 ? FSTATS : page===1 ? TSTATS : CSTATS;
+  st.forEach(([v,l],i)=>{ document.getElementById('sv'+i).textContent = v; document.getElementById('sl'+i).textContent = l; });
+  document.getElementById('clearBtn').disabled = page===2;
+  styleOverlay();
+}
+function setPage(i){
+  const changed = i!==page;
+  if(changed){ panel.classList.remove('adding'); document.activeElement?.blur?.(); }
+  page = i; lsSet('flights.page', String(i));
+  track.style.transform = `translateX(${-i*100/3}%)`;
+  if(changed && (selected!=null || selTrip!=null || selCountry)){ selected=null; selTrip=null; selCountry=null; render(); }
+  else renderChrome();
+  if(i===2) loadCountries();
+}
+document.getElementById('tabs').addEventListener('click', e=>{
+  const b = e.target.closest('[data-page]'); if(b) setPage(+b.dataset.page);
+});
+// свайп влево-вправо по содержимому шторки
+let sw = null;
+pagesEl.addEventListener('touchstart', e=>{
+  if(!isMobile() || e.touches.length>1 || e.target.closest('input,.sugg,.modes')) return;
+  const t = e.touches[0]; sw = {x0:t.clientX, y0:t.clientY, dx:0, h:false, t0:Date.now()};
+},{passive:true});
+pagesEl.addEventListener('touchmove', e=>{
+  if(!sw) return;
+  const t = e.touches[0], dx = t.clientX-sw.x0, dy = t.clientY-sw.y0;
+  if(!sw.h){
+    if(Math.abs(dx)>10 && Math.abs(dx)>Math.abs(dy)*1.3) sw.h = true;
+    else { if(Math.abs(dy)>10) sw = null; return; }
+  }
+  e.preventDefault();
+  sw.dx = dx;
+  const d = ((page===0 && dx>0) || (page===2 && dx<0)) ? dx*0.3 : dx;
+  track.classList.add('dragging');
+  track.style.transform = `translateX(calc(${-page*100/3}% + ${d/3}px))`;
+},{passive:false});
+function swipeEnd(){
+  if(!sw) return;
+  const s = sw; sw = null; track.classList.remove('dragging');
+  if(!s.h) return;
+  const v = Math.abs(s.dx)/Math.max(1, Date.now()-s.t0);
+  let i = page;
+  if(s.dx < -60 || (s.dx < -20 && v > 0.5)) i = Math.min(2, page+1);
+  else if(s.dx > 60 || (s.dx > 20 && v > 0.5)) i = Math.max(0, page-1);
+  setPage(i);
+}
+pagesEl.addEventListener('touchend', swipeEnd);
+pagesEl.addEventListener('touchcancel', swipeEnd);
+
+// ---------- поиск мест (OpenStreetMap) ----------
+const KIND_ICO = { station:'🚉', halt:'🚉', train_station:'🚉', bus_station:'🚏', bus_stop:'🚏', ferry_terminal:'⛴', city:'🏙', town:'🏘', village:'🏡' };
+async function geoSearch(q, signal){
+  const c = map ? map.getCenter() : {lat:50,lng:20};
+  try{
+    const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=8&lat=${c.lat.toFixed(2)}&lon=${c.lng.toFixed(2)}`, {signal});
+    if(!r.ok) throw new Error('photon '+r.status);
+    const j = await r.json();
+    return j.features.map(f=>{
+      const p = f.properties, [lon,lat] = f.geometry.coordinates;
+      const city = (p.city && p.city!==p.name) ? p.city : null;
+      return { name: p.name || p.city || q, sub: [city, p.state, p.country].filter(Boolean).join(', '),
+               lat, lon, cc: (p.countrycode||'').toUpperCase(), kind: p.osm_value || p.type || '' };
+    });
+  }catch(e){
+    if(signal.aborted) throw e;
+    // запасной вариант — Nominatim
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=8&accept-language=ru&q=${encodeURIComponent(q)}`, {signal});
+    const j = await r.json();
+    return j.map(x=>{ const parts = x.display_name.split(',').map(s=>s.trim());
+      return { name: x.name || parts[0], sub: parts.slice(1,4).join(', '), lat:+x.lat, lon:+x.lon,
+               cc: (x.address?.country_code||'').toUpperCase(), kind: x.type || '' }; });
+  }
+}
+function setupGeoAC(input){
+  const box = input.nextElementSibling; let items = [], idx = -1, timer = null, ctrl = null;
+  const close = ()=>{ box.style.display='none'; idx=-1; };
+  const pick = p=>{ input.value = p.name; input._place = {name:p.name, sub:p.sub, lat:+p.lat.toFixed(5), lon:+p.lon.toFixed(5), cc:p.cc}; close(); };
+  const show = html=>{ box.innerHTML = html; box.style.display='block'; };
+  input.addEventListener('input', ()=>{
+    input._place = null;
+    clearTimeout(timer); ctrl?.abort();
+    const q = input.value.trim();
+    if(q.length < 2){ close(); return; }
+    timer = setTimeout(async ()=>{
+      ctrl = new AbortController();
+      show('<div class="sub" style="cursor:default">Ищу…</div>');
+      try{
+        const res = await geoSearch(q, ctrl.signal);
+        const seen = new Set();
+        items = res.filter(p=>{ const k=p.name+'|'+p.sub; if(seen.has(k)) return false; seen.add(k); return true; });
+        if(!items.length){ show('<div class="sub" style="cursor:default">Ничего не найдено</div>'); return; }
+        show(items.map((p,i)=>`<div data-i="${i}"><span class="kind">${KIND_ICO[p.kind]||'📍'}</span>${esc(p.name)}<div class="sub">${esc(p.sub)}</div></div>`).join(''));
+        idx = -1;
+      }catch(e){ if(!ctrl.signal.aborted) show('<div class="sub" style="cursor:default">Нет связи с поиском — проверьте интернет</div>'); }
+    }, 300);
+  });
+  input.addEventListener('keydown', e=>{
+    if(box.style.display!=='block' || !items.length) return;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+      e.preventDefault(); idx = (idx + (e.key==='ArrowDown'?1:-1) + items.length) % items.length;
+      [...box.children].forEach((c,i)=>c.classList.toggle('active', i===idx));
+    } else if(e.key==='Enter'){ e.preventDefault(); pick(items[Math.max(idx,0)]); }
+    else if(e.key==='Escape') close();
+  });
+  box.addEventListener('pointerdown', e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); pick(items[d.dataset.i]); } });
+  input.addEventListener('blur', ()=> setTimeout(close,150));
+}
+
+// ---------- форма поездки ----------
+let tripMode = lsGet('flights.tripMode','train'); if(!MODES[tripMode]) tripMode = 'train';
+function modesUi(){ document.querySelectorAll('#modes [data-mode]').forEach(b=>b.classList.toggle('on', b.dataset.mode===tripMode)); }
+document.getElementById('modes').addEventListener('click', e=>{
+  const b = e.target.closest('[data-mode]'); if(!b) return;
+  tripMode = b.dataset.mode; lsSet('flights.tripMode', tripMode); modesUi();
+});
+async function roadRoute(a, b){
+  const ctrl = new AbortController(); const tm = setTimeout(()=>ctrl.abort(), 9000);
+  try{
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=simplified&geometries=geojson`, {signal:ctrl.signal});
+    const j = await r.json();
+    if(j.code!=='Ok' || !j.routes?.length) return null;
+    return { line: j.routes[0].geometry.coordinates.map(([x,y])=>[+x.toFixed(5), +y.toFixed(5)]), km: j.routes[0].distance/1000 };
+  }catch(e){ return null; } finally { clearTimeout(tm); }
+}
+document.getElementById('tripForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const fromEl = document.getElementById('tFrom'), toEl = document.getElementById('tTo'), err = document.getElementById('tErr'), btn = document.getElementById('tSubmit');
+  const a = fromEl._place, b = toEl._place;
+  if(!a || !b){ err.textContent = 'Выберите места из выпадающего списка.'; return; }
+  if(dist(a,b) < 0.3){ err.textContent = 'Начало и конец поездки совпадают.'; return; }
+  err.textContent = '';
+  let line = null, km = dist(a,b);
+  if(tripMode==='bus' || tripMode==='car'){
+    btn.disabled = true; btn.textContent = 'Строю маршрут по дорогам…';
+    const r = await roadRoute(a, b);
+    btn.disabled = false; btn.textContent = 'Добавить поездку';
+    if(r){ line = r.line; km = r.km; }
+  }
+  const t = { id: Date.now(), mode: tripMode, from: a, to: b, date: document.getElementById('tDate').value,
+              note: document.getElementById('tNote').value.trim(), km: Math.round(km*10)/10, line };
+  trips.push(t); saveTrips();
+  // следующая поездка начинается там, где закончилась эта
+  fromEl.value = b.name; fromEl._place = b; toEl.value = ''; toEl._place = null; document.getElementById('tNote').value = '';
+  if(isMobile()){ document.activeElement?.blur(); panel.classList.remove('adding'); }
+  else toEl.focus();
+  selectTrip(t.id);
+});
 
 // ---------- Boot ----------
 initMap();
@@ -863,7 +1316,10 @@ fetch('airports.json').then(r=>r.json()).then(rows=>{
   AIRPORTS = rows.map(([iata,icao,name,city,country,lat,lon])=>({iata,icao,name,city,country,lat,lon}));
   for(const a of AIRPORTS) if(!BY_IATA[a.iata]) BY_IATA[a.iata]=a;
   setupAC(document.getElementById('from')); setupAC(document.getElementById('to'));
+  setupGeoAC(document.getElementById('tFrom')); setupGeoAC(document.getElementById('tTo'));
+  modesUi();
   render();
+  setPage(page);
   if(isMobile() && !flights.length){ panel.classList.add('adding'); setSheet('full'); }
 }).catch(()=>{
   document.getElementById('list').innerHTML='<div class="empty">Не удалось загрузить airports.json.<br>Откройте сайт через веб-сервер (GitHub Pages), а не двойным кликом по файлу.</div>';
