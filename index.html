@@ -7,16 +7,17 @@
 <title>Мои перелёты</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="lib/maplibre-gl.css">
 <style>
   :root{
     --bg:#05070d; --panel:rgba(14,18,30,.9); --line:rgba(255,255,255,.08);
     --text:#e8ecf5; --muted:#8a93a8; --accent:#ffb347; --accent2:#5ad1ff; --danger:#ff6b6b;
-    --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   [hidden]{display:none!important}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
-  #globe{position:fixed;top:0;left:0;right:0;height:100%}
+  #map,#globe{position:fixed;top:0;left:0;right:0;height:100%;background:var(--bg)}
 
   /* ---------- Panel (desktop) ---------- */
   .panel{position:fixed;top:16px;left:16px;bottom:16px;width:360px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
@@ -31,7 +32,6 @@
 
   .sel{margin:0 18px 10px;padding:10px 12px;border-radius:10px;background:rgba(255,179,71,.12);border:1px solid rgba(255,179,71,.3);
     display:flex;align-items:center;gap:10px}
-  .sel[hidden]{display:none}
   .sel .route{font-family:"JetBrains Mono",monospace;font-size:15px}
   .sel .meta{color:var(--muted);font-size:12px;margin-top:2px}
   .sel button{margin-left:auto;background:none;border:0;color:var(--muted);font-size:18px;padding:2px 6px}
@@ -83,8 +83,24 @@
 
   .toggle{position:fixed;top:16px;left:16px;z-index:6;display:none;background:var(--panel)}
   .panel.hidden ~ .toggle{display:block}
-  .ctrls{position:fixed;right:16px;bottom:16px;z-index:5;display:flex;gap:6px}
-  .ctrls button{background:var(--panel);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+
+  /* ---------- Map controls ---------- */
+  .ctrls{position:fixed;top:calc(var(--safe-t) + 16px);right:16px;z-index:6;display:flex;gap:6px;align-items:flex-start}
+  .ctrls > button,.ctrls .layers > button{background:var(--panel);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  .layers{position:relative}
+  .menu{position:absolute;top:calc(100% + 6px);right:0;min-width:170px;background:#121827;border:1px solid var(--line);border-radius:12px;padding:6px;
+    box-shadow:0 10px 30px rgba(0,0,0,.4);display:none}
+  .layers.open .menu{display:block}
+  .menu button{display:flex;width:100%;align-items:center;gap:10px;background:none;border:0;padding:9px 10px;border-radius:8px;text-align:left}
+  .menu button:hover{background:rgba(255,255,255,.07)}
+  .menu button.on{color:var(--accent)}
+  .menu button.on::after{content:"✓";margin-left:auto}
+  .menu hr{border:0;border-top:1px solid var(--line);margin:6px 4px}
+
+  .maplibregl-popup-content{background:#121827;color:var(--text);border-radius:10px;padding:10px 12px;font:13px Inter,system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .maplibregl-popup-tip{border-top-color:#121827!important;border-bottom-color:#121827!important}
+  .maplibregl-popup-close-button{color:var(--muted);font-size:16px;padding:0 6px}
+  .maplibregl-ctrl-bottom-right{right:6px}
 
   /* ---------- Mobile: bottom sheet ---------- */
   @media (max-width:640px){
@@ -110,13 +126,14 @@
     .list{padding:4px 8px}
     .flight{padding:11px 8px}
     footer{padding:10px 16px 12px}
-    .ctrls{top:calc(env(safe-area-inset-top,0px) + 12px);right:12px;bottom:auto}
+    .ctrls{top:calc(var(--safe-t) + 12px);right:12px}
     .ctrls button{padding:8px 11px}
   }
 </style>
 </head>
 <body>
-<div id="globe"></div>
+<div id="map"></div>
+<div id="globe" hidden></div>
 
 <aside class="panel" id="panel">
   <div class="sheet-top" id="sheetTop">
@@ -160,87 +177,289 @@
 <button class="toggle" id="showBtn">☰ Перелёты</button>
 
 <div class="ctrls">
-  <button id="mapBtn" type="button">☀ День</button>
   <button id="rotateBtn" type="button">⟳ Вращение</button>
+  <div class="layers" id="layers">
+    <button id="layersBtn" type="button">🗺 Карта</button>
+    <div class="menu" id="menu">
+      <button data-view="map" type="button">🗺 Карта</button>
+      <button data-view="dark" type="button">🌑 Тёмная</button>
+      <button data-view="sat" type="button">🛰 Спутник</button>
+      <button data-view="globe3d" type="button">🌍 3D глобус</button>
+      <div id="dayNightWrap" hidden>
+        <hr>
+        <button id="dayNightBtn" type="button">☀ Дневная Земля</button>
+      </div>
+    </div>
+  </div>
 </div>
 
-<script src="lib/globe.gl.min.js"></script>
+<script src="lib/maplibre-gl.js"></script>
 <script>
 const KEY = 'flights.v1';
 let AIRPORTS = [], BY_IATA = {};
 let flights = load();
 let selected = null;
+let ARCS = [], PTS = [];          // данные, которые рисуют обе карты
 const isMobile = () => matchMedia('(max-width:640px)').matches;
 
 function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(flights)); }catch(e){ alert('Не удалось сохранить в localStorage'); } }
-
-// ---------- Globe ----------
-const MAPS = { night:'img/earth-night.jpg', day:'img/earth-blue-marble.jpg' };
-let mapMode = (()=>{ try{ return localStorage.getItem('flights.map')==='day' ? 'day' : 'night'; }catch(e){ return 'night'; } })();
-function mapUrl(){ return MAPS[mapMode]; }
-const BASE_ALT = 2.2;
-let zoomK = 1;
-const globe = Globe({ rendererConfig:{ antialias:true, alpha:false } })(document.getElementById('globe'))
-  .globeImageUrl(mapUrl())
-  .bumpImageUrl('img/earth-topology.png')
-  .backgroundImageUrl('img/night-sky.png')
-  .atmosphereColor('#5ad1ff').atmosphereAltitude(0.18)
-  .arcStartLat(d=>d.a.lat).arcStartLng(d=>d.a.lon).arcEndLat(d=>d.b.lat).arcEndLng(d=>d.b.lon)
-  // arcStroke(null) → линия толщиной 1px, не утолщается при приближении
-  .arcStroke(null)
-  .arcColor(d=> selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
-                : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)'])
-  .arcAltitudeAutoScale(0.3)
-  .arcDashLength(0.5).arcDashGap(0.15).arcDashAnimateTime(4000)
-  .arcLabel(d=>`<b>${d.a.iata} → ${d.b.iata}</b><br>${esc(d.a.city)} → ${esc(d.b.city)}<br>${fmtKm(d.km)} км${d.date?'<br>'+d.date:''}${d.airline?' · '+esc(d.airline):''}`)
-  .pointLat('lat').pointLng('lon').pointColor(()=> '#ffb347').pointAltitude(0.002)
-  .pointRadius(d=>(0.16+Math.min(d.n,20)*0.015)*zoomK).pointResolution(12)
-  .pointLabel(d=>`<b>${d.iata}</b> ${esc(d.name)}<br>${esc(d.city)}, ${d.country} · ${d.n} рейс(ов)`)
-  .labelLat('lat').labelLng('lon').labelText('iata').labelSize(()=>0.42*Math.max(zoomK,0.2)).labelDotRadius(0)
-  .labelColor(()=> 'rgba(255,255,255,0.8)').labelAltitude(0.004).labelResolution(2)
-  .onArcClick(d=> selectFlight(d.id))
-  .onZoom(pov=>{
-    // точки и подписи уменьшаются при приближении, чтобы оставаться аккуратными
-    const k = Math.max(0.06, Math.min(1, pov.altitude / BASE_ALT));
-    if(Math.abs(k-zoomK)/zoomK > 0.08){ zoomK = k; scheduleZoomRefresh(); }
-  });
-
-let zoomRaf = 0;
-function scheduleZoomRefresh(){
-  if(zoomRaf) return;
-  zoomRaf = requestAnimationFrame(()=>{
-    zoomRaf=0;
-    const k = zoomK;
-    globe.pointRadius(d=>(0.16+Math.min(d.n,20)*0.015)*k).labelSize(()=>0.42*Math.max(k,0.2));
-  });
-}
-
-globe.controls().autoRotate = true;
-globe.controls().autoRotateSpeed = 0.35;
-globe.pointOfView({lat:52, lng:21, altitude:BASE_ALT});
+function lsGet(k,d){ try{ return localStorage.getItem(k) ?? d; }catch(e){ return d; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 
 // ---------- Helpers ----------
 function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtKm(n){ return Math.round(n).toLocaleString('ru-RU'); }
 function fmtDate(s){ if(!s) return ''; const [y,m,d]=s.split('-'); return `${d}.${m}.${y}`; }
+const RAD = Math.PI/180;
 function dist(a,b){
-  const R=6371, r=x=>x*Math.PI/180;
-  const dLat=r(b.lat-a.lat), dLon=r(b.lon-a.lon);
-  const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLon/2)**2;
-  return 2*R*Math.asin(Math.sqrt(h));
+  const dLat=(b.lat-a.lat)*RAD, dLon=(b.lon-a.lon)*RAD;
+  const h=Math.sin(dLat/2)**2+Math.cos(a.lat*RAD)*Math.cos(b.lat*RAD)*Math.sin(dLon/2)**2;
+  return 2*6371*Math.asin(Math.sqrt(h));
 }
 function midLng(a,b){ let d=b-a; if(d>180)d-=360; if(d<-180)d+=360; return a+d/2; }
-function focusFlight(d){
-  globe.controls().autoRotate=false; rotBtnUpdate();
+// дуга большого круга — реальный кратчайший путь самолёта
+function greatCircle(a,b,n){
+  const toV=p=>[Math.cos(p.lat*RAD)*Math.cos(p.lon*RAD), Math.cos(p.lat*RAD)*Math.sin(p.lon*RAD), Math.sin(p.lat*RAD)];
+  const A=toV(a), B=toV(b);
+  const d=Math.acos(Math.min(1,Math.max(-1,A[0]*B[0]+A[1]*B[1]+A[2]*B[2])));
+  if(d<1e-6) return [[a.lon,a.lat],[b.lon,b.lat]];
+  n = n || Math.max(16, Math.ceil(d/RAD*1.5));
+  const out=[]; let prev=null;
+  for(let i=0;i<=n;i++){
+    const f=i/n, s1=Math.sin((1-f)*d)/Math.sin(d), s2=Math.sin(f*d)/Math.sin(d);
+    const x=s1*A[0]+s2*B[0], y=s1*A[1]+s2*B[1], z=s1*A[2]+s2*B[2];
+    let lon=Math.atan2(y,x)/RAD; const lat=Math.atan2(z,Math.hypot(x,y))/RAD;
+    if(prev!==null){ while(lon-prev>180) lon-=360; while(lon-prev<-180) lon+=360; } // без разрыва на 180°
+    out.push([lon,lat]); prev=lon;
+  }
+  return out;
+}
+
+// ======================================================================
+//  Вид 1: MapLibre (основная карта-глобус)
+// ======================================================================
+const SAT_STYLE = {
+  version:8,
+  glyphs:'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  sources:{
+    sat:{type:'raster',tileSize:256,maxzoom:19,
+      tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      attribution:'Снимки © Esri, Maxar, Earthstar Geographics'},
+    places:{type:'raster',tileSize:256,maxzoom:19,
+      tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}']}
+  },
+  layers:[
+    {id:'bg',type:'background',paint:{'background-color':'#0b1020'}},
+    {id:'sat',type:'raster',source:'sat'},
+    {id:'places',type:'raster',source:'places',paint:{'raster-opacity':0.9}}
+  ]
+};
+const VIEWS = {
+  map:    { label:'🗺 Карта',    style:'https://tiles.openfreemap.org/styles/liberty', line:'#ff5a1f', line2:'#1f7aff', selLine:'#d10068', dot:'#ff5a1f', text:'#1b1f2a', halo:'#ffffff' },
+  dark:   { label:'🌑 Тёмная',   style:'https://tiles.openfreemap.org/styles/dark',    line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', halo:'#05070d' },
+  sat:    { label:'🛰 Спутник',  style:SAT_STYLE,                                       line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', halo:'#05070d' },
+  globe3d:{ label:'🌍 3D глобус' }
+};
+let view = VIEWS[lsGet('flights.view','map')] ? lsGet('flights.view','map') : 'map';
+let map = null, mapReady = false, popup = null;
+let rotating = true;
+
+function initMap(){
+  const v = VIEWS[view === 'globe3d' ? 'map' : view];
+  map = new maplibregl.Map({
+    container:'map', style:v.style, center:[21,50], zoom: isMobile()?0.9:1.6,
+    attributionControl:{compact:true}, renderWorldCopies:false, maxPitch:60,
+    dragRotate:false
+  });
+  map.touchZoomRotate.disableRotation();
+  if(!isMobile()) map.addControl(new maplibregl.NavigationControl({showCompass:false}), 'bottom-right');
+  map.on('style.load', ()=>{
+    map.setProjection({type:'globe'});
+    try{ map.setSky({'atmosphere-blend':['interpolate',['linear'],['zoom'],0,1,5,1,7,0]}); }catch(e){}
+    addOverlay();
+    mapReady = true;
+  });
+  // остановить вращение, когда пользователь трогает карту
+  ['mousedown','touchstart','wheel','dragstart'].forEach(ev=> map.on(ev, ()=>{ if(rotating){ rotating=false; rotBtnUpdate(); } }));
+  map.on('click','flights-hit', e=>{ const f=e.features[0]; if(f) selectFlight(Number(f.properties.id)); });
+  map.on('click','airports', e=>{
+    const p=e.features[0].properties, a=BY_IATA[p.iata]; if(!a) return;
+    popup?.remove();
+    popup = new maplibregl.Popup({offset:10,closeButton:true}).setLngLat([a.lon,a.lat])
+      .setHTML(`<b>${a.iata}</b> · ${esc(a.name)}<br><span style="color:#8a93a8">${esc(a.city)}, ${a.country} · ${p.n} рейс(ов)</span>`).addTo(map);
+  });
+  for(const l of ['flights-hit','airports']){
+    map.on('mouseenter',l,()=>map.getCanvas().style.cursor='pointer');
+    map.on('mouseleave',l,()=>map.getCanvas().style.cursor='');
+  }
+  requestAnimationFrame(spin);
+}
+
+let lastT = 0;
+function spin(t){
+  if(map && view!=='globe3d' && rotating && !document.hidden && map.getZoom() < 3.5 && !map.isMoving()){
+    const dt = lastT ? Math.min(100, t-lastT) : 16;
+    const c = map.getCenter(); c.lng -= dt * 0.004;
+    map.jumpTo({center:c});
+  }
+  lastT = t;
+  requestAnimationFrame(spin);
+}
+
+function addOverlay(){
+  const v = VIEWS[view] || VIEWS.map;
+  if(!map.getSource('flights')) map.addSource('flights',{type:'geojson',data:flightsGeo()});
+  if(!map.getSource('airports')) map.addSource('airports',{type:'geojson',data:airportsGeo()});
+  map.addLayer({id:'flights-line',type:'line',source:'flights',layout:{'line-cap':'round','line-join':'round'},
+    paint:{'line-width':['case',['get','sel'],3.2,1.8],'line-color':v.line,'line-opacity':0.9}});
+  map.addLayer({id:'flights-hit',type:'line',source:'flights',paint:{'line-width':16,'line-opacity':0}});
+  map.addLayer({id:'airports',type:'circle',source:'airports',
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.5,4,4,8,6],'circle-color':v.dot,
+      'circle-stroke-width':1.5,'circle-stroke-color':v.halo}});
+  map.addLayer({id:'airport-labels',type:'symbol',source:'airports',minzoom:1.5,
+    layout:{'text-field':['get','iata'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.1],'text-anchor':'top','text-allow-overlap':false},
+    paint:{'text-color':v.text,'text-halo-color':v.halo,'text-halo-width':1.4}});
+  styleOverlay();
+}
+function styleOverlay(){
+  if(!map || !map.getLayer('flights-line')) return;
+  const v = VIEWS[view] || VIEWS.map;
+  const hasSel = selected!=null;
+  map.setPaintProperty('flights-line','line-color', ['case',['get','sel'], v.selLine, ['==',['%',['get','idx'],2],0], v.line, v.line2]);
+  map.setPaintProperty('flights-line','line-opacity', hasSel ? ['case',['get','sel'],1,0.3] : 0.9);
+  // выбранная линия рисуется поверх остальных
+  map.setLayoutProperty('flights-line','line-sort-key', ['case',['get','sel'],1,0]);
+}
+function flightsGeo(){
+  return {type:'FeatureCollection',features:ARCS.map((d,i)=>({type:'Feature',
+    properties:{id:d.id, idx:i, sel:d.id===selected},
+    geometry:{type:'LineString',coordinates:d.line}}))};
+}
+function airportsGeo(){
+  return {type:'FeatureCollection',features:PTS.map(p=>({type:'Feature',properties:{iata:p.iata,n:p.n},geometry:{type:'Point',coordinates:[p.lon,p.lat]}}))};
+}
+function updateMap(){
+  if(!map || !mapReady) return;
+  map.getSource('flights')?.setData(flightsGeo());
+  map.getSource('airports')?.setData(airportsGeo());
+  styleOverlay();
+}
+function focusMap(d){
+  const lons=d.line.map(c=>c[0]), lats=d.line.map(c=>c[1]);
+  const desk = !isMobile() && !panel.classList.contains('hidden');
+  map.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]],
+    {padding:{top:70,bottom:40,left: desk ? 410 : 40, right:40}, maxZoom:6.5, duration:1200});
+}
+function setMapStyle(){
+  mapReady = false;
+  popup?.remove();
+  map.setStyle(VIEWS[view].style, {diff:false});
+}
+
+// ======================================================================
+//  Вид 2: 3D глобус (globe.gl) — загружается только когда нужен
+// ======================================================================
+let globe = null, globeLoading = null, zoomK = 1;
+const BASE_ALT = 2.2;
+const EARTH = { night:'img/earth-night.jpg', day:'img/earth-blue-marble.jpg' };
+let earthMode = lsGet('flights.map','night')==='day' ? 'day' : 'night';
+
+function loadGlobe(){
+  if(globe) return Promise.resolve();
+  if(globeLoading) return globeLoading;
+  globeLoading = new Promise((res,rej)=>{
+    const s=document.createElement('script'); s.src='lib/globe.gl.min.js';
+    s.onload=()=>{ createGlobe(); res(); }; s.onerror=rej; document.head.appendChild(s);
+  });
+  return globeLoading;
+}
+function createGlobe(){
+  globe = Globe({ rendererConfig:{ antialias:true } })(document.getElementById('globe'))
+    .globeImageUrl(EARTH[earthMode])
+    .bumpImageUrl('img/earth-topology.png')
+    .backgroundImageUrl('img/night-sky.png')
+    .atmosphereColor('#5ad1ff').atmosphereAltitude(0.18)
+    .arcStartLat(d=>d.a.lat).arcStartLng(d=>d.a.lon).arcEndLat(d=>d.b.lat).arcEndLng(d=>d.b.lon)
+    .arcStroke(null)   // 1px — не утолщается при приближении
+    .arcAltitudeAutoScale(0.3)
+    .arcDashLength(0.5).arcDashGap(0.15).arcDashAnimateTime(4000)
+    .arcLabel(d=>`<b>${d.a.iata} → ${d.b.iata}</b><br>${esc(d.a.city)} → ${esc(d.b.city)}<br>${fmtKm(d.km)} км${d.date?'<br>'+fmtDate(d.date):''}${d.airline?' · '+esc(d.airline):''}`)
+    .pointLat('lat').pointLng('lon').pointColor(()=> '#ffb347').pointAltitude(0.002).pointResolution(12)
+    .pointLabel(d=>`<b>${d.iata}</b> ${esc(d.name)}<br>${esc(d.city)}, ${d.country} · ${d.n} рейс(ов)`)
+    .labelLat('lat').labelLng('lon').labelText('iata').labelDotRadius(0)
+    .labelColor(()=> 'rgba(255,255,255,0.8)').labelAltitude(0.004).labelResolution(2)
+    .onArcClick(d=> selectFlight(d.id))
+    .onZoom(pov=>{
+      const k = Math.max(0.06, Math.min(1, pov.altitude / BASE_ALT));
+      if(Math.abs(k-zoomK)/zoomK > 0.08){ zoomK = k; globeSizes(); }
+    });
+  globeSizes();
+  globe.controls().autoRotateSpeed = 0.35;
+  globe.controls().addEventListener('start', ()=>{ if(rotating){ rotating=false; rotBtnUpdate(); } });
+  const c = map ? map.getCenter() : {lat:50,lng:21};
+  globe.pointOfView({lat:c.lat, lng:c.lng, altitude:BASE_ALT});
+}
+function globeSizes(){
+  const k=zoomK;
+  globe.pointRadius(d=>(0.16+Math.min(d.n,20)*0.015)*k).labelSize(()=>0.42*Math.max(k,0.2));
+}
+function updateGlobe(){
+  if(!globe) return;
+  globe.arcColor(d=> selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
+                  : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)']);
+  globe.arcsData(ARCS).pointsData(PTS).labelsData(PTS);
+  globe.controls().autoRotate = rotating;
+}
+function focusGlobe(d){
   globe.pointOfView({lat:(d.a.lat+d.b.lat)/2, lng:midLng(d.a.lon,d.b.lon), altitude: Math.min(2.5, 0.5+d.km/5500)}, 1200);
 }
 
+// ======================================================================
+//  Переключение видов
+// ======================================================================
+const layersEl = document.getElementById('layers');
+document.getElementById('layersBtn').onclick = e=>{ e.stopPropagation(); layersEl.classList.toggle('open'); };
+document.addEventListener('click', e=>{ if(!layersEl.contains(e.target)) layersEl.classList.remove('open'); });
+document.querySelectorAll('[data-view]').forEach(b=> b.onclick = ()=>{ setView(b.dataset.view); layersEl.classList.remove('open'); });
+document.getElementById('dayNightBtn').onclick = ()=>{
+  earthMode = earthMode==='day' ? 'night' : 'day'; lsSet('flights.map', earthMode);
+  if(globe) globe.globeImageUrl(EARTH[earthMode]);
+  viewUi();
+};
+function viewUi(){
+  document.getElementById('layersBtn').textContent = VIEWS[view].label;
+  document.querySelectorAll('[data-view]').forEach(b=> b.classList.toggle('on', b.dataset.view===view));
+  document.getElementById('dayNightWrap').hidden = view!=='globe3d';
+  document.getElementById('dayNightBtn').textContent = earthMode==='day' ? '☾ Ночная Земля' : '☀ Дневная Земля';
+}
+async function setView(v){
+  if(v===view && (v!=='globe3d' || globe)) return;
+  const prev = view; view = v; lsSet('flights.view', v); viewUi();
+  if(v==='globe3d'){
+    try{ await loadGlobe(); }catch(e){ alert('Не удалось загрузить 3D глобус'); view=prev; viewUi(); return; }
+    if(map){ const c=map.getCenter(); globe.pointOfView({lat:c.lat,lng:c.lng,altitude:BASE_ALT}); }
+    document.getElementById('map').hidden = true;
+    document.getElementById('globe').hidden = false;
+    applySheet(); updateGlobe();
+  } else {
+    document.getElementById('globe').hidden = true;
+    document.getElementById('map').hidden = false;
+    if(globe){ globe.controls().autoRotate=false; const p=globe.pointOfView(); if(prev==='globe3d') map.jumpTo({center:[p.lng,p.lat]}); }
+    applySheet();
+    setMapStyle();
+  }
+}
+
 // ---------- Selection ----------
+function focusFlight(d){
+  rotating=false; rotBtnUpdate();
+  if(view==='globe3d'){ if(globe) focusGlobe(d); } else if(map) focusMap(d);
+}
 function selectFlight(id){
   selected = id;
   render();
-  const d = globe.arcsData().find(a=>a.id===id);
+  const d = ARCS.find(a=>a.id===id);
   if(!d) return;
   if(isMobile()) setSheet('peek');
   focusFlight(d);
@@ -253,29 +472,30 @@ function render(){
   for(const f of flights){
     const a=BY_IATA[f.from], b=BY_IATA[f.to];
     if(!a||!b) continue;
-    arcs.push({...f, a, b, km: dist(a,b)});
+    arcs.push({...f, a, b, km: dist(a,b), line: greatCircle(a,b)});
     for(const x of [a,b]) used[x.iata] = (used[x.iata]||0)+1;
   }
-  const pts = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
-  globe.arcsData(arcs).pointsData(pts).labelsData(pts);
+  ARCS = arcs;
+  PTS = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
+  if(selected!=null && !arcs.some(a=>a.id===selected)) selected=null;
+  updateMap(); updateGlobe();
 
   const total = arcs.reduce((s,a)=>s+a.km,0);
   document.getElementById('sFlights').textContent = arcs.length;
   document.getElementById('sKm').textContent = total >= 100000 ? Math.round(total/1000)+'k' : fmtKm(total);
-  document.getElementById('sAirports').textContent = pts.length;
-  document.getElementById('sCountries').textContent = new Set(pts.map(p=>p.country)).size;
+  document.getElementById('sAirports').textContent = PTS.length;
+  document.getElementById('sCountries').textContent = new Set(PTS.map(p=>p.country)).size;
 
-  // карточка выбранного перелёта
   const s = arcs.find(a=>a.id===selected), sel = document.getElementById('sel');
   if(s){
     sel.hidden = false;
     document.getElementById('selRoute').innerHTML = `${s.a.iata}<i>→</i>${s.b.iata}`;
     document.getElementById('selMeta').textContent = `${s.a.city} → ${s.b.city} · ${fmtKm(s.km)} км${s.date?' · '+fmtDate(s.date):''}${s.airline?' · '+s.airline:''}`;
-  } else { sel.hidden = true; if(selected!=null) selected=null; }
+  } else sel.hidden = true;
   updatePeek();
 
   const list = document.getElementById('list');
-  if(!arcs.length){ list.innerHTML = '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на глобусе.</div>'; return; }
+  if(!arcs.length){ list.innerHTML = '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на карте.</div>'; return; }
   const sorted = [...arcs].sort((x,y)=> (y.date||'').localeCompare(x.date||'') || y.id-x.id);
   let lastYear = null, html = '';
   for(const f of sorted){
@@ -356,7 +576,6 @@ document.getElementById('form').addEventListener('submit', e=>{
   err.textContent='';
   const f = { id: Date.now(), from, to, date: document.getElementById('date').value, airline: document.getElementById('airline').value.trim() };
   flights.push(f); save();
-  // следующий перелёт начинается там, где закончился этот
   fromEl.value = toEl.value; fromEl.dataset.iata = to; toEl.value=''; toEl.dataset.iata=''; document.getElementById('airline').value='';
   if(isMobile()){ document.activeElement?.blur(); panel.classList.remove('adding'); }
   else toEl.focus();
@@ -389,25 +608,22 @@ document.getElementById('clearBtn').onclick = ()=>{
   if(flights.length && confirm('Удалить все перелёты? Совет: сначала сделайте экспорт.')){ flights=[]; selected=null; save(); render(); }
 };
 
-// ---------- Desktop panel toggle ----------
+// ---------- Panel / rotation ----------
 const panel=document.getElementById('panel');
 document.getElementById('hideBtn').onclick=()=>panel.classList.add('hidden');
 document.getElementById('showBtn').onclick=()=>panel.classList.remove('hidden');
 const rotBtn=document.getElementById('rotateBtn');
-function rotBtnUpdate(){ rotBtn.style.color = globe.controls().autoRotate ? 'var(--accent)' : ''; }
-rotBtn.onclick=()=>{ globe.controls().autoRotate=!globe.controls().autoRotate; rotBtnUpdate(); };
-rotBtnUpdate();
-const mapBtn=document.getElementById('mapBtn');
-function mapBtnUpdate(){ mapBtn.textContent = mapMode==='day' ? '☾ Ночь' : '☀ День'; }
-mapBtn.onclick=()=>{
-  mapMode = mapMode==='day' ? 'night' : 'day';
-  try{ localStorage.setItem('flights.map', mapMode); }catch(e){}
-  globe.globeImageUrl(mapUrl()); mapBtnUpdate();
+function rotBtnUpdate(){
+  rotBtn.style.color = rotating ? 'var(--accent)' : '';
+  if(globe) globe.controls().autoRotate = rotating && view==='globe3d';
+}
+rotBtn.onclick=()=>{
+  rotating=!rotating;
+  if(rotating && map && view!=='globe3d' && map.getZoom()>=3.5) map.easeTo({zoom: isMobile()?0.9:1.6, duration:900});
+  rotBtnUpdate();
 };
-mapBtnUpdate();
 
 // ---------- Mobile bottom sheet ----------
-// состояния: peek — видна только шапка и статистика, half — список, full — почти весь экран
 let sheet = 'half';
 const sheetTop = document.getElementById('sheetTop');
 function sheetH(){ return panel.getBoundingClientRect().height; }
@@ -418,22 +634,22 @@ function visibleFor(state){
   if(state==='full') return H;
   return Math.min(H, Math.max(peekH()+180, innerHeight*0.5));
 }
-function applySheet(animateGlobe=true){
-  if(!isMobile()){ panel.style.removeProperty('--sheet-y'); sizeGlobe(innerHeight); return; }
+function applySheet(){
+  if(!isMobile()){ panel.style.removeProperty('--sheet-y'); sizeView(innerHeight); return; }
   const vis = visibleFor(sheet);
   panel.style.setProperty('--sheet-y', (sheetH()-vis)+'px');
-  // глобус занимает видимую часть экрана над шторкой, чтобы маршрут был по центру
-  sizeGlobe(innerHeight - (sheet==='full' ? visibleFor('half') : vis) + 16);
+  // карта занимает видимую часть экрана над шторкой — маршрут оказывается по центру
+  sizeView(innerHeight - (sheet==='full' ? visibleFor('half') : vis) + 16);
 }
 function setSheet(state){ sheet = state; applySheet(); }
 function updatePeek(){ if(isMobile() && sheet==='peek') applySheet(); }
-function sizeGlobe(h){
+function sizeView(h){
   h = Math.max(200, Math.round(h));
-  document.getElementById('globe').style.height = h+'px';
-  globe.width(innerWidth).height(h);
+  for(const id of ['map','globe']) document.getElementById(id).style.height = h+'px';
+  if(map) map.resize();
+  if(globe) globe.width(innerWidth).height(h);
 }
 
-// перетаскивание шторки
 let drag = null;
 sheetTop.addEventListener('pointerdown', e=>{
   if(!isMobile() || e.target.closest('button')) return;
@@ -452,7 +668,7 @@ function endDrag(e){
   const dy = e.clientY - drag.y0, moved = drag.moved; drag = null;
   const order = ['peek','half','full'];
   let i = order.indexOf(sheet);
-  if(!moved) i = sheet==='peek' ? 1 : 0;           // тап по шапке: свернуть/развернуть
+  if(!moved) i = sheet==='peek' ? 1 : 0;
   else if(dy < -40) i = Math.min(2, i+1);
   else if(dy > 40) i = Math.max(0, i-1);
   if(order[i]==='peek') panel.classList.remove('adding');
@@ -467,11 +683,14 @@ document.getElementById('addToggle').onclick = ()=>{
   setSheet(on ? 'full' : 'half');
   if(on) setTimeout(()=>document.getElementById(document.getElementById('from').value ? 'to' : 'from').focus(), 320);
 };
-
 addEventListener('resize', ()=> applySheet());
 
 // ---------- Boot ----------
+initMap();
+viewUi();
 applySheet();
+rotBtnUpdate();
+if(view==='globe3d'){ view='map'; setView('globe3d'); }
 fetch('airports.json').then(r=>r.json()).then(rows=>{
   AIRPORTS = rows.map(([iata,icao,name,city,country,lat,lon])=>({iata,icao,name,city,country,lat,lon}));
   for(const a of AIRPORTS) if(!BY_IATA[a.iata]) BY_IATA[a.iata]=a;
