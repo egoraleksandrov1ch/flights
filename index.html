@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Мои перелёты</title>
+<title>Travel Diary</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="lib/maplibre-gl.css">
@@ -195,15 +195,15 @@
   <div class="sheet-top" id="sheetTop">
     <div class="grip"></div>
     <header>
-      <h1 id="title">Мои <span>перелёты</span></h1>
+      <h1 id="title">Diary <span>Fly</span></h1>
       <button class="icon-btn" id="shareBtn" type="button" title="Поделиться">⤴<span class="share-lbl"> Поделиться</span></button>
       <button class="icon-btn" id="addToggle" type="button">+ Добавить</button>
       <button class="icon-btn" id="hideBtn" type="button" title="Скрыть панель">✕</button>
     </header>
     <div class="tabs" id="tabs">
-      <button type="button" data-page="0">✈ Перелёты</button>
-      <button type="button" data-page="1">🚆 Поездки</button>
-      <button type="button" data-page="2">🌍 Страны</button>
+      <button type="button" data-page="0">✈ Fly</button>
+      <button type="button" data-page="1">🚆 Road</button>
+      <button type="button" data-page="2">🌍 Country</button>
     </div>
     <div class="sel" id="sel" hidden>
       <div><div class="route" id="selRoute"></div><div class="meta" id="selMeta"></div></div>
@@ -264,7 +264,7 @@
     <input type="file" id="importFile" accept=".json,application/json" hidden>
   </footer>
 </aside>
-<button class="toggle" id="showBtn">☰ Перелёты</button>
+<button class="toggle" id="showBtn">☰ Diary</button>
 
 <div class="pmodal" id="passportModal" hidden>
   <div class="pbox">
@@ -392,6 +392,8 @@ function initMap(){
   map.on('click','flights-hit', e=>{ const f=e.features[0]; if(f) selectFlight(Number(f.properties.id)); });
   map.on('click','trips-hit', e=>{ const f=e.features[0]; if(f) selectTrip(Number(f.properties.id)); });
   map.on('click','country-fill', e=>{ const f=e.features[0]; if(f && page===2) selectCountry(f.properties.iso); });
+  map.on('click','country-flags', e=>{ const f=e.features[0]; if(f && page===2) selectCountry(f.properties.iso); });
+  map.on('styleimagemissing', e=>{ if(e.id.startsWith('flag-') && !map.hasImage(e.id)) map.addImage(e.id, flagImage(e.id.slice(5)), {pixelRatio:2}); });
   map.on('click','airports', e=>{
     const p=e.features[0].properties, a=BY_IATA[p.iata]; if(!a) return;
     popup?.remove();
@@ -423,13 +425,10 @@ function addOverlay(){
   if(!map.getSource('airports')) map.addSource('airports',{type:'geojson',data:airportsGeo()});
   const round = {'line-cap':'round','line-join':'round'};
   // 0) посещённые страны (видны на странице «Страны»)
-  if(!map.getSource('countries')) map.addSource('countries',{type:'geojson',data:COUNTRY_GEO||EMPTY_FC});
-  map.addLayer({id:'country-fill',type:'fill',source:'countries',filter:['in',['get','iso'],['literal',[]]],
-    layout:{visibility:'none'},paint:{'fill-color':v.country,'fill-opacity':0.32}});
-  map.addLayer({id:'country-line',type:'line',source:'countries',filter:['in',['get','iso'],['literal',[]]],
-    layout:{visibility:'none'},paint:{'line-color':v.country,'line-width':1.2,'line-opacity':0.8}});
-  map.addLayer({id:'country-sel',type:'line',source:'countries',filter:['==',['get','iso'],''],
-    layout:{visibility:'none'},paint:{'line-color':v.selLine,'line-width':2.5}});
+  if(!map.getSource('countries')) map.addSource('countries',{type:'geojson',data:VISITED_FC});
+  if(!map.getSource('country-flags')) map.addSource('country-flags',{type:'geojson',data:FLAGS_FC});
+  map.addLayer({id:'country-fill',type:'fill',source:'countries',layout:{visibility:'none'},
+    paint:{'fill-color':'#22c55e','fill-opacity':0.4,'fill-antialias':true}});
   // 0b) наземные поездки: цвет по виду транспорта
   if(!map.getSource('trips')) map.addSource('trips',{type:'geojson',data:tripsGeo()});
   if(!map.getSource('trip-pts')) map.addSource('trip-pts',{type:'geojson',data:tripPtsGeo()});
@@ -465,16 +464,23 @@ function addOverlay(){
   map.addLayer({id:'airport-labels',type:'symbol',source:'airports',minzoom:1.5,
     layout:{'text-field':['get','iata'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.1],'text-anchor':'top','text-allow-overlap':false},
     paint:{'text-color':v.text,'text-halo-color':v.halo,'text-halo-width':1.4}});
+  map.addLayer({id:'country-flags',type:'symbol',source:'country-flags',layout:{visibility:'none',
+    'icon-image':['concat','flag-',['get','iso']],'icon-size':['interpolate',['linear'],['zoom'],0,0.55,4,0.8,7,1],
+    'icon-allow-overlap':false,'symbol-sort-key':['-',['get','area']]}});
   styleOverlay();
 }
 function styleOverlay(){
   if(!map || !map.getLayer('flights-base')) return;
-  // страны
-  const showC = page===2 ? 'visible' : 'none';
-  for(const l of ['country-fill','country-line','country-sel']) map.setLayoutProperty(l,'visibility',showC);
-  const inV = ['in',['get','iso'],['literal',VISITED]];
-  map.setFilter('country-fill', inV); map.setFilter('country-line', inV);
-  map.setFilter('country-sel', ['==',['get','iso'], selCountry||'']);
+  // страны: на странице Country видны только они, перелёты и поездки скрыты
+  const onC = page===2;
+  for(const l of ['country-fill','country-flags']) map.setLayoutProperty(l,'visibility', onC ? 'visible' : 'none');
+  // на странице Road перелёты скрыты, на странице Country скрыто всё, кроме стран
+  const hideFlights = page!==0 && (onC || page===1), hideTrips = onC;
+  for(const l of ['flights-base','flights-up','flights-sel','flights-pulse','flights-hit','airports','airport-labels'])
+    if(map.getLayer(l)) map.setLayoutProperty(l,'visibility', hideFlights ? 'none' : 'visible');
+  for(const l of ['trips-line','trips-up','trips-sel','trips-hit','trip-pts','trip-labels'])
+    if(map.getLayer(l)) map.setLayoutProperty(l,'visibility', hideTrips ? 'none' : 'visible');
+  map.setPaintProperty('country-fill','fill-opacity', selCountry ? ['case',['==',['get','iso'],selCountry],0.62,0.3] : 0.4);
   // поездки
   map.setFilter('trips-sel', ['==',['get','id'], selTrip==null ? -1 : selTrip]);
   map.setPaintProperty('trips-line','line-opacity', (selTrip!=null || selected!=null) ? 0.35 : 0.9);
@@ -532,7 +538,8 @@ function updateMap(){
   if(!map || !mapReady) return;
   map.getSource('trips')?.setData(tripsGeo());
   map.getSource('trip-pts')?.setData(tripPtsGeo());
-  if(COUNTRY_GEO && map.getSource('countries') && !countriesOnMap){ map.getSource('countries').setData(COUNTRY_GEO); countriesOnMap = true; }
+  map.getSource('countries')?.setData(VISITED_FC);
+  map.getSource('country-flags')?.setData(FLAGS_FC);
   map.getSource('flights')?.setData(flightsGeo());
   map.getSource('airports')?.setData(airportsGeo());
   styleOverlay();
@@ -600,8 +607,9 @@ function updateGlobe(){
   globe.arcColor(d=> d.up ? (d.id===selected ? ['#ffffff','#ffffff'] : selected==null ? ['rgba(170,178,195,0.8)','rgba(170,178,195,0.8)'] : ['rgba(170,178,195,0.3)','rgba(170,178,195,0.3)'])
                   : selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
                   : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)']);
-  globe.arcsData(ARCS).pointsData(PTS).labelsData(PTS);
-  globe.pathsData(TRIPS).pathPoints('line').pathPointLat(p=>p[1]).pathPointLng(p=>p[0]).pathPointAlt(0.002)
+  const gF = page===0, gT = page!==2;
+  globe.arcsData(gF?ARCS:[]).pointsData(gF?PTS:[]).labelsData(gF?PTS:[]);
+  globe.pathsData(gT?TRIPS:[]).pathPoints('line').pathPointLat(p=>p[1]).pathPointLng(p=>p[0]).pathPointAlt(0.002)
     .pathStroke(null).pathTransitionDuration(0)
     .pathColor(d=> d.id===selTrip ? '#ffffff' : d.up ? 'rgba(170,178,195,0.8)' : MODES[d.mode]?.color || '#fff')
     .pathDashLength(d=>d.up?0.02:1).pathDashGap(d=>d.up?0.015:0)
@@ -990,6 +998,7 @@ const EMPTY_FC = {type:'FeatureCollection',features:[]};
 let TRIPS = [], selTrip = null, selCountry = null;
 let FSTATS = [], TSTATS = [], CSTATS = [];
 let COUNTRY_GEO = null, countryLoading = null, countriesOnMap = false, VISITED = [], COUNTRIES = [];
+let COUNTRY_PARTS = {}, VISITED_FC = EMPTY_FC, FLAGS_FC = EMPTY_FC, VISITED_PTS = {};
 let page = Math.max(0, Math.min(2, parseInt(lsGet('flights.page','0'))||0));
 
 function kmShort(n){ return n >= 100000 ? Math.round(n/1000)+'k' : fmtKm(n); }
@@ -1082,6 +1091,12 @@ function renderCountries(){
   for(const t of TRIPS) if(!t.up){ add(t.from.cc, t.date, t.from.name, false, false); add(t.to.cc, t.date, t.to.name, true, false); }
   COUNTRIES = Object.values(m).sort((x,y)=>(y.last||'').localeCompare(x.last||'') || y.arrivals-x.arrivals);
   VISITED = COUNTRIES.map(c=>c.cc);
+  const ptsBy = {};
+  const addPt = (cc,lon,lat)=>{ if(cc) (ptsBy[cc] ||= []).push([lon,lat]); };
+  for(const a of ARCS) if(!a.up){ addPt(a.a.country,a.a.lon,a.a.lat); addPt(a.b.country,a.b.lon,a.b.lat); }
+  for(const t of TRIPS) if(!t.up){ addPt(t.from.cc,t.from.lon,t.from.lat); addPt(t.to.cc,t.to.lon,t.to.lat); }
+  VISITED_PTS = ptsBy;
+  [VISITED_FC, FLAGS_FC] = Object.keys(COUNTRY_PARTS).length ? buildVisitedGeo(ptsBy) : [EMPTY_FC, EMPTY_FC];
   if(selCountry && !VISITED.includes(selCountry)) selCountry = null;
   CSTATS = [[COUNTRIES.length, pluralRu(COUNTRIES.length,'страна','страны','стран')],
             [Math.round(COUNTRIES.length/195*100)+'%', 'мира'],
@@ -1113,14 +1128,8 @@ function selectCountry(cc){
   rotating=false; rotBtnUpdate();
   // границы страны: по контуру, если он загружен, иначе по посещённым точкам
   let pts = [];
-  const f = COUNTRY_GEO?.features.find(f=>f.properties.iso===cc);
-  if(f){
-    const polys = f.geometry.type==='Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-    // самый большой полигон — материковая часть (без далёких островов)
-    let best = null, bestN = 0;
-    for(const p of polys){ if(p[0].length > bestN){ bestN = p[0].length; best = p; } }
-    pts = best ? best[0] : [];
-  }
+  // границы закрашенных частей страны (без далёких островов, где не были)
+  for(const f of VISITED_FC.features) if(f.properties.iso===cc) pts.push(...f.geometry.coordinates[0]);
   if(!pts.length){
     for(const a of ARCS){ if(a.a.country===cc) pts.push([a.a.lon,a.a.lat]); if(a.b.country===cc) pts.push([a.b.lon,a.b.lat]); }
     for(const t of TRIPS){ if(t.from.cc===cc) pts.push([t.from.lon,t.from.lat]); if(t.to.cc===cc) pts.push([t.to.lon,t.to.lat]); }
@@ -1129,6 +1138,79 @@ function selectCountry(cc){
   const lons=pts.map(c=>c[0]), lats=pts.map(c=>c[1]);
   if(view==='globe3d'){ if(globe) globe.pointOfView({lat:(Math.min(...lats)+Math.max(...lats))/2, lng:(Math.min(...lons)+Math.max(...lons))/2, altitude:0.8}, 1200); return; }
   map?.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:6, duration:1200});
+}
+function unwrapRing(ring){
+  let prev = null;
+  return ring.map(([lon,lat])=>{
+    if(prev!==null){ while(lon-prev>180) lon-=360; while(lon-prev<-180) lon+=360; }
+    prev = lon; return [lon,lat];
+  });
+}
+function ringArea(r){ let a=0; for(let i=0,j=r.length-1;i<r.length;j=i++) a += (r[j][0]+r[i][0])*(r[j][1]-r[i][1]); return a/2; }
+function inRing(x, y, r){
+  let ins = false;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){
+    const [xi,yi]=r[i], [xj,yj]=r[j];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) ins = !ins;
+  }
+  return ins;
+}
+function partHas(part, lon, lat){
+  for(const x of [lon, lon+360, lon-360]){
+    const [a,b,c,d] = part.bbox;
+    if(x<a || x>c || lat<b || lat>d) continue;
+    if(inRing(x, lat, part.rings[0])) return true;
+  }
+  return false;
+}
+function partDist(part, lon, lat){
+  let best = Infinity; const r = part.rings[0], step = Math.max(1, Math.floor(r.length/200));
+  for(let i=0;i<r.length;i+=step){ for(const x of [lon, lon+360, lon-360]){ const d=(r[i][0]-x)**2+(r[i][1]-lat)**2; if(d<best) best=d; } }
+  return best;
+}
+function ringCentroid(r){
+  let a=0, cx=0, cy=0;
+  for(let i=0,j=r.length-1;i<r.length;j=i++){ const f=r[j][0]*r[i][1]-r[i][0]*r[j][1]; a+=f; cx+=(r[j][0]+r[i][0])*f; cy+=(r[j][1]+r[i][1])*f; }
+  return a ? [cx/(3*a), cy/(3*a)] : r[0];
+}
+// какие части страны закрашивать: основная (материковая) часть + острова и территории, где вы были
+// (Испания закрашивается без Канар, если на Канарах не были)
+function buildVisitedGeo(pointsByCc){
+  const feats = [], flags = [];
+  for(const [cc, pts] of Object.entries(pointsByCc)){
+    const parts = COUNTRY_PARTS[cc]; if(!parts) continue;
+    const used = new Set();
+    for(const [lon,lat] of pts){
+      let i = parts.findIndex(p=>partHas(p, lon, lat));
+      if(i<0){ let bd=Infinity; parts.forEach((p,k)=>{ const d=partDist(p,lon,lat); if(d<bd){ bd=d; i=k; } }); }
+      if(i>=0) used.add(i);
+    }
+    let mainI = 0; parts.forEach((p,k)=>{ if(p.area > parts[mainI].area) mainI = k; });
+    used.add(mainI);
+    const biggest = parts[mainI];   // флаг ставим над основной частью страны
+    for(const i of used){
+      const p = parts[i];
+      feats.push({type:'Feature',properties:{iso:cc},geometry:{type:'Polygon',coordinates:p.rings}});
+    }
+    if(biggest){
+      let [x,y] = ringCentroid(biggest.rings[0]);
+      if(!inRing(x, y, biggest.rings[0])){ const pt = pts.find(([lo,la])=>partHas(biggest,lo,la)); if(pt) [x,y] = pt; }
+      while(x>180) x-=360; while(x<-180) x+=360;
+      flags.push({type:'Feature',properties:{iso:cc, area:biggest.area},geometry:{type:'Point',coordinates:[x,y]}});
+    }
+  }
+  return [{type:'FeatureCollection',features:feats}, {type:'FeatureCollection',features:flags}];
+}
+// круглый флаг-эмодзи для карты
+function flagImage(cc){
+  const S = 64, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.save(); g.beginPath(); g.arc(S/2,S/2,S/2-4,0,7); g.fillStyle='#fff'; g.fill(); g.clip();
+  g.font = '58px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  g.textAlign='center'; g.textBaseline='middle'; g.fillText(flagEmoji(cc), S/2, S/2+3);
+  g.restore();
+  g.beginPath(); g.arc(S/2,S/2,S/2-4,0,7); g.lineWidth=4; g.strokeStyle='#ffffff'; g.stroke();
+  return g.getImageData(0,0,S,S);
 }
 function loadScriptOnce(src){
   return new Promise((res,rej)=>{
@@ -1143,16 +1225,27 @@ function loadCountries(){
       await loadScriptOnce('lib/topojson-client.min.js');
       const topo = await fetch('lib/countries-50m.json').then(r=>r.json());
       const fc = topojson.feature(topo, topo.objects.countries);
-      fc.features.forEach(f=>{ f.properties = {iso: f.id}; });
-      COUNTRY_GEO = fc; countriesOnMap = false;
-      updateMap();
+      // каждая страна -> отдельные части (материк, острова); кольца без разрыва на линии смены дат
+      const parts = {};
+      for(const f of fc.features){
+        const polys = f.geometry.type==='Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        parts[f.id] = polys.map(poly=>{
+          const rings = poly.map(unwrapRing);
+          const outer = rings[0];
+          let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+          for(const [x,y] of outer){ if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; }
+          return { iso:f.id, rings, bbox:[minX,minY,maxX,maxY], area: Math.abs(ringArea(outer)) };
+        });
+      }
+      COUNTRY_PARTS = parts; COUNTRY_GEO = fc;
+      render();
     }catch(e){ countryLoading = null; }
   })();
   return countryLoading;
 }
 
 // ---------- страницы шторки ----------
-const PAGE_TITLES = ['Мои <span>перелёты</span>', 'Мои <span>поездки</span>', 'Мои <span>страны</span>'];
+const PAGE_TITLES = ['Diary <span>Fly</span>', 'Diary <span>Road</span>', 'Diary <span>Country</span>'];
 const track = document.getElementById('track'), pagesEl = document.getElementById('pages');
 function renderChrome(){
   document.getElementById('title').innerHTML = PAGE_TITLES[page];
@@ -1169,7 +1262,7 @@ function setPage(i){
   page = i; lsSet('flights.page', String(i));
   track.style.transform = `translateX(${-i*100/3}%)`;
   if(changed && (selected!=null || selTrip!=null || selCountry)){ selected=null; selTrip=null; selCountry=null; render(); }
-  else renderChrome();
+  else { renderChrome(); updateGlobe(); }
   if(i===2) loadCountries();
 }
 document.getElementById('tabs').addEventListener('click', e=>{
