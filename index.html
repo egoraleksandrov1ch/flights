@@ -73,6 +73,9 @@
   .flight .meta{color:var(--muted);font-size:11px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .flight .del{background:none;border:0;color:var(--muted);padding:6px 10px;font-size:18px;flex:none}
   .flight .del:hover{color:var(--danger)}
+  .year.up{color:var(--accent2)}
+  .flight.upcoming .route{color:#c9cfdb}
+  .badge{font:600 10px Inter,system-ui,sans-serif;color:var(--accent2);background:rgba(90,209,255,.12);border-radius:6px;padding:2px 6px;margin-left:8px;vertical-align:2px}
   .year{color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.08em;padding:12px 8px 4px}
   .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
   footer{display:flex;gap:6px;padding:10px 18px 14px;border-top:1px solid var(--line)}
@@ -268,9 +271,9 @@ const SAT_STYLE = {
   ]
 };
 const VIEWS = {
-  map:    { label:'🗺 Карта',    style:'https://tiles.openfreemap.org/styles/liberty', line:'#ff5a1f', line2:'#1f7aff', selLine:'#d10068', dot:'#ff5a1f', text:'#1b1f2a', halo:'#ffffff' },
-  dark:   { label:'🌑 Тёмная',   style:'https://tiles.openfreemap.org/styles/dark',    line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', halo:'#05070d' },
-  sat:    { label:'🛰 Спутник',  style:SAT_STYLE,                                       line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', halo:'#05070d' },
+  map:    { label:'🗺 Карта',    style:'https://tiles.openfreemap.org/styles/liberty', line:'#ff5a1f', line2:'#1f7aff', selLine:'#d10068', dot:'#ff5a1f', text:'#1b1f2a', upLine:'#7d8696', upSel:'#4b5363', halo:'#ffffff' },
+  dark:   { label:'🌑 Тёмная',   style:'https://tiles.openfreemap.org/styles/dark',    line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#8a93a8', upSel:'#c9cfdb', halo:'#05070d' },
+  sat:    { label:'🛰 Спутник',  style:SAT_STYLE,                                       line:'#ffb347', line2:'#5ad1ff', selLine:'#ffffff', dot:'#ffb347', text:'#ffffff', upLine:'#c9cfdb', upSel:'#ffffff', halo:'#05070d' },
   globe3d:{ label:'🌍 3D глобус' }
 };
 let view = VIEWS[lsGet('flights.view','map')] ? lsGet('flights.view','map') : 'map';
@@ -326,8 +329,11 @@ function addOverlay(){
   if(!map.getSource('airports')) map.addSource('airports',{type:'geojson',data:airportsGeo()});
   const round = {'line-cap':'round','line-join':'round'};
   // 1) тусклая подложка всего маршрута: градиент от вылета к прилёту
-  map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,
+  map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,filter:['!',['get','up']],
     paint:{'line-width':1.6,'line-opacity':0.4,'line-gradient':['interpolate',['linear'],['line-progress'],0,v.line,1,v.line2]}});
+  // 1b) предстоящие перелёты — серый пунктир, без импульса
+  map.addLayer({id:'flights-up',type:'line',source:'flights',layout:{'line-join':'round'},filter:['get','up'],
+    paint:{'line-width':1.8,'line-color':v.upLine,'line-opacity':0.85,'line-dasharray':[2,2]}});
   // 2) выбранный перелёт — сплошной яркой линией
   map.addLayer({id:'flights-sel',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
     paint:{'line-width':3,'line-color':v.selLine}});
@@ -349,7 +355,10 @@ function styleOverlay(){
   map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.18 : 0.4);
   map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
   // при выборе импульс бежит только по выбранному маршруту
-  map.setFilter('flights-pulse', hasSel ? ['==',['get','id'],selected] : null);
+  const notUp = ['!',['get','up']];
+  map.setFilter('flights-pulse', hasSel ? ['all',['==',['get','id'],selected],notUp] : notUp);
+  map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.35 : 0.85);
+  map.setPaintProperty('flights-sel','line-color', ['case',['get','up'], VIEWS[view]?.upSel || '#9aa3b5', VIEWS[view]?.selLine || '#fff']);
 }
 
 // ---------- Импульс вдоль линий ----------
@@ -386,7 +395,7 @@ function pulse(t){
 requestAnimationFrame(pulse);
 function flightsGeo(){
   return {type:'FeatureCollection',features:ARCS.map((d,i)=>({type:'Feature',
-    properties:{id:d.id},
+    properties:{id:d.id, up:!!d.up},
     geometry:{type:'LineString',coordinates:d.line}}))};
 }
 function airportsGeo(){
@@ -435,7 +444,7 @@ function createGlobe(){
     .arcStartLat(d=>d.a.lat).arcStartLng(d=>d.a.lon).arcEndLat(d=>d.b.lat).arcEndLng(d=>d.b.lon)
     .arcStroke(null)   // 1px — не утолщается при приближении
     .arcAltitudeAutoScale(0.3)
-    .arcDashLength(0.5).arcDashGap(0.15).arcDashAnimateTime(4000)
+    .arcDashLength(d=>d.up?0.02:0.5).arcDashGap(d=>d.up?0.015:0.15).arcDashAnimateTime(d=>d.up?0:4000)
     .arcLabel(d=>`<b>${d.a.iata} → ${d.b.iata}</b><br>${esc(d.a.city)} → ${esc(d.b.city)}<br>${fmtKm(d.km)} км${d.date?'<br>'+fmtDate(d.date):''}${d.airline?' · '+esc(d.airline):''}`)
     .pointLat('lat').pointLng('lon').pointColor(()=> '#ffb347').pointAltitude(0.002).pointResolution(12)
     .pointLabel(d=>`<b>${d.iata}</b> ${esc(d.name)}<br>${esc(d.city)}, ${d.country} · ${d.n} рейс(ов)`)
@@ -458,7 +467,8 @@ function globeSizes(){
 }
 function updateGlobe(){
   if(!globe) return;
-  globe.arcColor(d=> selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
+  globe.arcColor(d=> d.up ? (d.id===selected ? ['#ffffff','#ffffff'] : selected==null ? ['rgba(170,178,195,0.8)','rgba(170,178,195,0.8)'] : ['rgba(170,178,195,0.3)','rgba(170,178,195,0.3)'])
+                  : selected==null ? ['rgba(255,179,71,0.95)','rgba(90,209,255,0.95)']
                   : d.id===selected ? ['#ffffff','#ffffff'] : ['rgba(255,179,71,0.25)','rgba(90,209,255,0.25)']);
   globe.arcsData(ARCS).pointsData(PTS).labelsData(PTS);
   globe.controls().autoRotate = rotating;
@@ -558,6 +568,15 @@ function fitAll(){
 
 // ---------- Render ----------
 let yearFilter = lsGet('flights.year','all');
+function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+const isUpcoming = f => !!f.date && f.date > todayStr();
+function untilLabel(date){
+  const days = Math.round((new Date(date+'T00:00') - new Date(todayStr()+'T00:00'))/864e5);
+  if(days===1) return 'завтра';
+  const m = days%10, h = days%100;
+  const w = (m===1 && h!==11) ? 'день' : (m>=2 && m<=4 && (h<12||h>14)) ? 'дня' : 'дней';
+  return `через ${days} ${w}`;
+}
 const yearOf = f => f.date ? f.date.slice(0,4) : 'none';
 function render(){
   renderYears();
@@ -566,19 +585,22 @@ function render(){
     if(yearFilter!=='all' && yearOf(f)!==yearFilter) continue;
     const a=BY_IATA[f.from], b=BY_IATA[f.to];
     if(!a||!b) continue;
-    arcs.push({...f, a, b, km: dist(a,b), line: greatCircle(a,b)});
+    const up = isUpcoming(f);
+    arcs.push({...f, a, b, up, km: dist(a,b), line: greatCircle(a,b)});
     for(const x of [a,b]) used[x.iata] = (used[x.iata]||0)+1;
   }
+  // статистика — только по совершённым перелётам
+  const done = arcs.filter(a=>!a.up), doneAp = new Set(done.flatMap(a=>[a.a.iata,a.b.iata]));
   ARCS = arcs;
   PTS = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
   if(selected!=null && !arcs.some(a=>a.id===selected)) selected=null;
   updateMap(); updateGlobe();
 
-  const total = arcs.reduce((s,a)=>s+a.km,0);
-  document.getElementById('sFlights').textContent = arcs.length;
+  const total = done.reduce((s,a)=>s+a.km,0);
+  document.getElementById('sFlights').textContent = done.length;
   document.getElementById('sKm').textContent = total >= 100000 ? Math.round(total/1000)+'k' : fmtKm(total);
-  document.getElementById('sAirports').textContent = PTS.length;
-  document.getElementById('sCountries').textContent = new Set(PTS.map(p=>p.country)).size;
+  document.getElementById('sAirports').textContent = doneAp.size;
+  document.getElementById('sCountries').textContent = new Set([...doneAp].map(k=>BY_IATA[k].country)).size;
 
   const s = arcs.find(a=>a.id===selected), sel = document.getElementById('sel');
   if(s){
@@ -590,15 +612,20 @@ function render(){
 
   const list = document.getElementById('list');
   if(!arcs.length){ list.innerHTML = flights.length ? '<div class="empty">За этот период перелётов нет.</div>' : '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на карте.</div>'; return; }
-  const sorted = [...arcs].sort((x,y)=> (y.date||'').localeCompare(x.date||'') || y.id-x.id);
+  // предстоящие — сверху, ближайший первым; дальше прошедшие по годам
+  const upcoming = arcs.filter(a=>a.up).sort((x,y)=> x.date.localeCompare(y.date));
+  const past = arcs.filter(a=>!a.up).sort((x,y)=> (y.date||'').localeCompare(x.date||'') || y.id-x.id);
   let lastYear = null, html = '';
-  for(const f of sorted){
-    const y = f.date ? f.date.slice(0,4) : 'Без даты';
-    if(y!==lastYear){ html += `<div class="year">${y}</div>`; lastYear=y; }
+  if(upcoming.length) html += `<div class="year up">Предстоящие</div>`;
+  for(const f of [...upcoming, ...past]){
+    if(!f.up){
+      const y = f.date ? f.date.slice(0,4) : 'Без даты';
+      if(y!==lastYear){ html += `<div class="year">${y}</div>`; lastYear=y; }
+    }
     html += `
-    <div class="flight${f.id===selected?' active':''}" data-id="${f.id}">
+    <div class="flight${f.id===selected?' active':''}${f.up?' upcoming':''}" data-id="${f.id}">
       <div class="info">
-        <div class="route">${f.a.iata}<i>→</i>${f.b.iata}</div>
+        <div class="route">${f.a.iata}<i>→</i>${f.b.iata}${f.up?`<span class="badge">${untilLabel(f.date)}</span>`:''}</div>
         <div class="meta">${esc(f.a.city)} → ${esc(f.b.city)} · ${fmtKm(f.km)} км${f.date?' · '+fmtDate(f.date):''}${f.airline?' · '+esc(f.airline):''}</div>
       </div>
       <button class="del" data-del="${f.id}" title="Удалить" type="button">×</button>
