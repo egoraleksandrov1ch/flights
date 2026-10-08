@@ -309,10 +309,19 @@ function spin(t){
 
 function addOverlay(){
   const v = VIEWS[view] || VIEWS.map;
-  if(!map.getSource('flights')) map.addSource('flights',{type:'geojson',data:flightsGeo()});
+  // lineMetrics нужен для градиента вдоль линии (line-progress)
+  if(!map.getSource('flights')) map.addSource('flights',{type:'geojson',data:flightsGeo(),lineMetrics:true});
   if(!map.getSource('airports')) map.addSource('airports',{type:'geojson',data:airportsGeo()});
-  map.addLayer({id:'flights-line',type:'line',source:'flights',layout:{'line-cap':'round','line-join':'round'},
-    paint:{'line-width':['case',['get','sel'],3.2,1.8],'line-color':v.line,'line-opacity':0.9}});
+  const round = {'line-cap':'round','line-join':'round'};
+  // 1) тусклая подложка всего маршрута: градиент от вылета к прилёту
+  map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,
+    paint:{'line-width':1.6,'line-opacity':0.4,'line-gradient':['interpolate',['linear'],['line-progress'],0,v.line,1,v.line2]}});
+  // 2) выбранный перелёт — сплошной яркой линией
+  map.addLayer({id:'flights-sel',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
+    paint:{'line-width':3,'line-color':v.selLine}});
+  // 3) бегущий импульс, как в 3D глобусе: летит от вылета к прилёту
+  map.addLayer({id:'flights-pulse',type:'line',source:'flights',layout:round,
+    paint:{'line-width':3,'line-gradient':pulseExpr(0)}});
   map.addLayer({id:'flights-hit',type:'line',source:'flights',paint:{'line-width':16,'line-opacity':0}});
   map.addLayer({id:'airports',type:'circle',source:'airports',
     paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.5,4,4,8,6],'circle-color':v.dot,
@@ -323,17 +332,49 @@ function addOverlay(){
   styleOverlay();
 }
 function styleOverlay(){
-  if(!map || !map.getLayer('flights-line')) return;
-  const v = VIEWS[view] || VIEWS.map;
+  if(!map || !map.getLayer('flights-base')) return;
   const hasSel = selected!=null;
-  map.setPaintProperty('flights-line','line-color', ['case',['get','sel'], v.selLine, ['==',['%',['get','idx'],2],0], v.line, v.line2]);
-  map.setPaintProperty('flights-line','line-opacity', hasSel ? ['case',['get','sel'],1,0.3] : 0.9);
-  // выбранная линия рисуется поверх остальных
-  map.setLayoutProperty('flights-line','line-sort-key', ['case',['get','sel'],1,0]);
+  map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.18 : 0.4);
+  map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
+  // при выборе импульс бежит только по выбранному маршруту
+  map.setFilter('flights-pulse', hasSel ? ['==',['get','id'],selected] : null);
 }
+
+// ---------- Импульс вдоль линий ----------
+const PULSE_MS = 4000, PULSE_LEN = 0.4;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function hexRgb(h){ h=h.replace('#',''); return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16)); }
+function pulseExpr(phase){
+  const v = VIEWS[view] || VIEWS.map;
+  const A = hexRgb(v.line), B = hexRgb(v.line2);
+  const head = phase*(1+PULSE_LEN), tail = head-PULSE_LEN;
+  const col = (x,a)=>{ const c=A.map((av,i)=>Math.round(av+(B[i]-av)*x)); return `rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(3)})`; };
+  const alphaAt = x => (x>=tail && x<=head) ? Math.pow((x-tail)/PULSE_LEN, 1.1) : 0;
+  const xs = new Set([0,1]);
+  for(let i=1;i<40;i++) xs.add(i/40);
+  for(const x of [tail, head, head+0.004]) if(x>0 && x<1) xs.add(x);
+  const sorted = [...xs].sort((a,b)=>a-b);
+  const expr = ['interpolate',['linear'],['line-progress']];
+  let prev = -1;
+  for(const x of sorted){
+    if(x-prev < 1e-4) continue;
+    expr.push(x, col(x, x>head ? 0 : alphaAt(x)));
+    prev = x;
+  }
+  return expr;
+}
+let lastPulse = 0;
+function pulse(t){
+  if(map && mapReady && view!=='globe3d' && !document.hidden && !reduceMotion && t-lastPulse > 33 && map.getLayer('flights-pulse')){
+    lastPulse = t;
+    map.setPaintProperty('flights-pulse','line-gradient', pulseExpr((t % PULSE_MS)/PULSE_MS));
+  }
+  requestAnimationFrame(pulse);
+}
+requestAnimationFrame(pulse);
 function flightsGeo(){
   return {type:'FeatureCollection',features:ARCS.map((d,i)=>({type:'Feature',
-    properties:{id:d.id, idx:i, sel:d.id===selected},
+    properties:{id:d.id},
     geometry:{type:'LineString',coordinates:d.line}}))};
 }
 function airportsGeo(){
