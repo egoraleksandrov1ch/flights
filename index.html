@@ -913,10 +913,15 @@ const Passport = (()=>{
     for(const f of list){
       const a=BY_IATA[f.from], b=BY_IATA[f.to];
       km += dist(a,b);
-      for(const x of [a,b]){ apCount[x.iata]=(apCount[x.iata]||0)+1; if(x.country && !countries.includes(x.country)) countries.push(x.country); }
+      for(const x of [a,b]) apCount[x.iata]=(apCount[x.iata]||0)+1;
       const key = [f.from,f.to].sort().join('-'); routes[key]=(routes[key]||0)+1;
       const al = (f.airline||'').replace(/\s*\d+\s*$/,'').trim().toLowerCase();
       if(al) airlines.add(al);
+    }
+    // флаги — страны прилёта, от последнего перелёта к первому
+    for(const f of [...list].reverse()){
+      const c = BY_IATA[f.to].country;
+      if(c && !countries.includes(c)) countries.push(c);
     }
     const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1])[0]?.[0];
     const home = top(apCount) || '---';
