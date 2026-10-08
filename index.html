@@ -1886,7 +1886,7 @@ function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Mat
 function rng(seed){ return ()=>{ seed^=seed<<13; seed^=seed>>>17; seed^=seed<<5; return (seed>>>0)/4294967296; }; }
 const shortName = n => {
   let s = String(n).split(',')[0].replace(/\s+(Hbf|Hauptbahnhof|Centralna|Główny|Glowny|Central Station|Station|hlavní nádraží|Centrale|Part-Dieu|Gare)$/i,'').trim();
-  const dash = s.split(/\s*-\s*/); if(dash.length>1 && dash[0].length>=4) s = dash[0];   // Budapest-Keleti -> Budapest
+  s = s.replace(/-(Keleti|Nyugati|Déli|Centralna|Główna|Glowna|Hbf|Centrale|Central)$/i, '');   // Budapest-Keleti -> Budapest
   return s;
 };
 
@@ -1918,7 +1918,14 @@ function fitProjection(pts){
 function proj(lon, lat){ return [FRAME.x + FRAME.w/2 + (mx(lon)-P.cx)*P.k, FRAME.y + FRAME.h/2 - (my(lat)-P.cy)*P.k]; }
 function pathFrom(geoms){
   const p = new Path2D();
-  for(const poly of geoms) for(const ring of poly){ ring.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); p.closePath(); }
+  for(const poly of geoms) for(const ring0 of poly){
+    // кольца через линию смены дат: делаем непрерывными и рисуем копии со сдвигом ±360°
+    let prev = null;
+    const ring = ring0.map(([lon,lat])=>{ if(prev!==null){ while(lon-prev>180) lon-=360; while(lon-prev<-180) lon+=360; } prev=lon; return [lon,lat]; });
+    const minL = Math.min(...ring.map(q=>q[0])), maxL = Math.max(...ring.map(q=>q[0]));
+    const shifts = [0]; if(maxL>180) shifts.push(-360); if(minL<-180) shifts.push(360);
+    for(const sh of shifts){ ring.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon+sh,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); p.closePath(); }
+  }
   return p;
 }
 
@@ -1994,7 +2001,10 @@ function draw(){
   if(LAND){
     const lp = pathFrom(LAND);
     // «береговая штриховка» — несколько обводок с затуханием
-    for(let i=5;i>=1;i--){ ctx.strokeStyle=`rgba(107,84,52,${0.06*i})`; ctx.lineWidth=i*5; ctx.stroke(lp); }
+    // ширина «свечения» берегов зависит от масштаба — на карте мира оно тонкое
+    const cw = Math.max(0.15, Math.min(1, P.k/2500));
+    ctx.lineJoin='round';
+    for(let i=5;i>=1;i--){ ctx.strokeStyle=`rgba(107,84,52,${0.06*i})`; ctx.lineWidth=i*5*cw; ctx.stroke(lp); }
     ctx.fillStyle=LANDC; ctx.fill(lp);
     ctx.save(); ctx.clip(lp);
     ctx.strokeStyle='rgba(107,84,52,0.10)'; ctx.lineWidth=1;
@@ -2014,14 +2024,15 @@ function draw(){
 
   // маршрут: красная линия с тенью
   const ordered = [...list].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const dense = ordered.length > 15, lw = ordered.length > 40 ? 3.5 : dense ? 5 : 7;
   for(const pass of ['shadow','line']){
     for(const t of ordered){
       const line = t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]];
       ctx.beginPath();
       line.forEach(([lon,lat],i)=>{ let [x,y]=proj(lon,lat); if(pass==='shadow'){ x+=3; y+=4; } i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
       ctx.lineCap='round'; ctx.lineJoin='round';
-      if(pass==='shadow'){ ctx.strokeStyle='rgba(60,30,10,0.25)'; ctx.lineWidth=9; ctx.setLineDash([]); }
-      else { ctx.strokeStyle=RED; ctx.lineWidth=7; ctx.setLineDash(t.mode==='ferry' ? [16,12] : []); }
+      if(pass==='shadow'){ ctx.strokeStyle='rgba(60,30,10,0.25)'; ctx.lineWidth=lw+2; ctx.setLineDash([]); }
+      else { ctx.strokeStyle=RED; ctx.lineWidth=lw; ctx.setLineDash(t.mode==='ferry' ? [lw*2.3,lw*1.7] : []); }
       ctx.stroke(); ctx.setLineDash([]);
     }
   }
@@ -2036,14 +2047,16 @@ function draw(){
     return px[0];
   };
   for(const t of ordered){
+    if(ordered.length > 30) break;   // при большом числе поездок значки только мешают
     const line = t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]];
     let best = null, bestScore = -1;
     for(const f of [0.5,0.4,0.6,0.32,0.68,0.25,0.75]){
       const q = along(line, f);
       const score = Math.min(...stopXY.map(s=>Math.hypot(s[0]-q[0], s[1]-q[1])), ...badgeXY.map(s=>Math.hypot(s[0]-q[0], s[1]-q[1])*1.2), 999);
-      if(score > 46){ best = q; break; }
+      if(score > 46){ best = q; bestScore = score; break; }
       if(score > bestScore){ bestScore = score; best = q; }
     }
+    if(bestScore < 40) continue;   // некуда поставить — пропускаем
     const [x,y] = best; badgeXY.push(best);
     ctx.beginPath(); ctx.arc(x,y,21,0,7); ctx.fillStyle='#f3e6c4'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=RED; ctx.stroke();
     ctx.font='22px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -2051,23 +2064,41 @@ function draw(){
   }
   // города: точки и подписи машинкой
   const stops = new Map();
-  for(const t of ordered) for(const p of [t.from,t.to]){ const k=p.lat.toFixed(3)+','+p.lon.toFixed(3); if(!stops.has(k)) stops.set(k,p); }
-  const placed = [];
-  for(const p of stops.values()){
+  for(const t of ordered) for(const p of [t.from,t.to]){
+    const k = p.lat.toFixed(2)+','+p.lon.toFixed(2);
+    const s = stops.get(k); if(s) s.n++; else stops.set(k, {p, n:1});
+  }
+  const dotR = stops.size > 40 ? 5 : stops.size > 15 ? 7 : 9;
+  for(const {p} of stops.values()){
     const [x,y] = proj(p.lon,p.lat);
-    ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.fillStyle=INK; ctx.fill();
-    ctx.beginPath(); ctx.arc(x,y,4,0,7); ctx.fillStyle='#f3e6c4'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,dotR,0,7); ctx.fillStyle=INK; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,dotR*0.45,0,7); ctx.fillStyle='#f3e6c4'; ctx.fill();
+  }
+  // подписи: сначала самые частые города; пропускаем те, что налезают на другие подписи или значки
+  const fs = stops.size > 40 ? 22 : stops.size > 15 ? 26 : 30;
+  const boxes = badgeXY.map(([x,y])=>[x-22,y-22,x+22,y+22]);
+  const hit = b => boxes.some(q=> b[0]<q[2] && b[2]>q[0] && b[1]<q[3] && b[3]>q[1]);
+  let labels = 0; const maxLabels = 18, seenNames = new Set();
+  for(const {p} of [...stops.values()].sort((a,b)=>b.n-a.n)){
+    if(labels >= maxLabels) break;
     const name = shortName(p.name).toUpperCase();
-    ctx.font=`30px ${TYPE}`; ctx.textBaseline='alphabetic';
+    if(seenNames.has(name)) continue;
+    const [x,y] = proj(p.lon,p.lat);
+    ctx.font=`${fs}px ${TYPE}`; ctx.textBaseline='alphabetic';
     const tw = ctx.measureText(name).width;
-    let ly = y-20, lx = x;
-    if(placed.some(q=>Math.abs(q[0]-lx)<(tw+q[2])/2 && Math.abs(q[1]-ly)<34)) ly = y+44;
-    if(placed.some(q=>Math.abs(q[0]-lx)<(tw+q[2])/2 && Math.abs(q[1]-ly)<34)) continue;
-    lx = Math.max(FRAME.x+tw/2+8, Math.min(FRAME.x+FRAME.w-tw/2-8, lx));
-    ctx.textAlign='center';
-    ctx.lineWidth=6; ctx.strokeStyle='rgba(234,217,176,0.9)'; ctx.strokeText(name, lx, ly);
-    ctx.fillStyle=INK; ctx.fillText(name, lx, ly);
-    placed.push([lx,ly,tw]);
+    let placedBox = null, pos = null;
+    for(const [dx,dy,al] of [[0,-dotR-10,'center'],[0,dotR+fs+4,'center'],[dotR+8,fs*0.35,'left'],[-dotR-8,fs*0.35,'right']]){
+      let lx = x+dx; const ly = y+dy;
+      let left = al==='center' ? lx-tw/2 : al==='left' ? lx : lx-tw;
+      if(left < FRAME.x+6 || left+tw > FRAME.x+FRAME.w-6 || ly-fs < FRAME.y+4 || ly > FRAME.y+FRAME.h-4) continue;
+      const box = [left-6, ly-fs*0.85-4, left+tw+6, ly+fs*0.25+4];
+      if(!hit(box)){ placedBox = box; pos = [lx, ly, al]; break; }
+    }
+    if(!placedBox) continue;
+    ctx.textAlign = pos[2];
+    ctx.lineWidth=6; ctx.strokeStyle='rgba(234,217,176,0.9)'; ctx.strokeText(name, pos[0], pos[1]);
+    ctx.fillStyle=INK; ctx.fillText(name, pos[0], pos[1]);
+    boxes.push(placedBox); seenNames.add(name); labels++;
   }
   if(!list.length){
     ctx.textAlign='center'; ctx.fillStyle=INK2; ctx.font=`italic 40px ${SERIF}`;
@@ -2131,7 +2162,7 @@ function draw(){
       if(land){ const f=topojson.feature(land, land.objects.land); LAND = f.features.flatMap(x=>x.geometry.type==='Polygon'?[x.geometry.coordinates]:x.geometry.coordinates); }
       if(countries){
         const mesh = topojson.mesh(countries, countries.objects.countries, (a,b)=>a!==b);
-        BORDERS = ()=>{ const p=new Path2D(); for(const line of mesh.coordinates){ line.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); } return p; };
+        BORDERS = ()=>{ const p=new Path2D(); for(const line of mesh.coordinates){ let pl=null; line.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon,lat); (i && Math.abs(lon-pl)<180) ? p.lineTo(x,y) : p.moveTo(x,y); pl=lon; }); } return p; };
       }
     })().catch(()=>{ geoLoading = null; });
     return geoLoading;
