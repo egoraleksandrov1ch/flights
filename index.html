@@ -294,7 +294,8 @@
       <button id="passClose" type="button" title="Закрыть">✕</button>
     </div>
     <div class="periods" id="passPeriods"></div>
-    <div class="pcard"><canvas id="passCv" width="1080" height="1440"></canvas><div class="ploading" id="passLoading">Печатаю талон…</div></div>
+    <div class="periods" id="passThemes" hidden></div>
+    <div class="pcard"><canvas id="passCv" width="1080" height="1440"></canvas><div class="ploading" id="passLoading">Готовлю картинку…</div></div>
     <button class="primary psave" id="passSave" type="button" disabled>Сохранить фото</button>
     <div class="phint">Только совершённые перелёты. Время в воздухе — оценка по расстоянию.</div>
   </div>
@@ -1639,9 +1640,9 @@ fetch('airports.json').then(r=>r.json()).then(rows=>{
 // ======================================================================
 //  Посадочный талон — модальное окно «Поделиться»
 // ======================================================================
-const Passport = (()=>{
+const ShareCards = {};
+(()=>{
   const W = 1080, H = 1440;
-  const modal = document.getElementById('passportModal');
   const cv = document.getElementById('passCv'), ctx = cv.getContext('2d');
   let LAND = null, landLoading = null, period = 'all';
 
@@ -1851,39 +1852,562 @@ function draw(){
     return landLoading;
   }
 
-  function renderPeriods(){
-    const years = [...new Set(flights.filter(f=>f.date && isDone(f)).map(f=>f.date.slice(0,4)))].sort().reverse();
-    if(period!=='all' && !years.includes(period)) period='all';
-    document.getElementById('passPeriods').innerHTML = [['all','Всё время'], ...years.map(y=>[y,y])]
-      .map(([v,l])=>`<button type="button" data-p="${v}" class="${v===period?'on':''}">${l}</button>`).join('');
-  }
-  document.getElementById('passPeriods').addEventListener('click', e=>{
-    const b = e.target.closest('[data-p]'); if(!b) return;
-    period = b.dataset.p; renderPeriods(); draw();
-  });
+  ShareCards.fly = {
+    title: 'Посадочный <span>талон</span>', hint: 'Только совершённые перелёты. Время в воздухе — оценка по расстоянию.',
+    w: W, h: H,
+    periods(){
+      const years = [...new Set(flights.filter(f=>f.date && isDone(f)).map(f=>f.date.slice(0,4)))].sort().reverse();
+      return [['all','Всё время'], ...years.map(y=>[y,y])];
+    },
+    prepare(){ return Promise.all([loadLand(), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]); },
+    draw(p){ period = p; draw(); },
+    name(p){ return `boarding-pass-${p}.png`; },
+  };
+})();
 
-  async function open(){
-    period = (typeof yearFilter!=='undefined' && /^\d{4}$/.test(yearFilter)) ? yearFilter : 'all';
+// ======================================================================
+//  Карта экспедиции — «Поделиться» на странице Road
+// ======================================================================
+(()=>{
+const W = 1080, H = 1440, RAD = Math.PI/180;
+const cv = document.getElementById('passCv'), ctx = cv.getContext('2d');
+let LAND = null, BORDERS = null, period = 'all', geoLoading = null;
+
+// палитра «старая карта»
+const PAPER = '#ead9b0', PAPER_D = '#d8c08b', SEA = '#e6d6ab', LANDC = '#d6bd85', INK = '#3b2a17', INK2 = '#6b5434', RED = '#b3261e';
+const SERIF = '"IM Fell English", Georgia, serif', SC = '"IM Fell English SC", Georgia, serif', TYPE = '"Special Elite", "Courier New", monospace';
+const MODE = { train:{ico:'🚆', name:'RAIL'}, bus:{ico:'🚌', name:'COACH'}, car:{ico:'🚗', name:'MOTOR'}, ferry:{ico:'⛴', name:'SEA'} };
+const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function dist(a,b){ const dLat=(b.lat-a.lat)*RAD, dLon=(b.lon-a.lon)*RAD; const h=Math.sin(dLat/2)**2+Math.cos(a.lat*RAD)*Math.cos(b.lat*RAD)*Math.sin(dLon/2)**2; return 2*6371*Math.asin(Math.sqrt(h)); }
+function fmtD(s){ const [y,m,d]=s.split('-'); return `${+d} ${MON[+m-1]} ${y}`; }
+function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
+function rng(seed){ return ()=>{ seed^=seed<<13; seed^=seed>>>17; seed^=seed<<5; return (seed>>>0)/4294967296; }; }
+const shortName = n => {
+  let s = String(n).split(',')[0].replace(/\s+(Hbf|Hauptbahnhof|Centralna|Główny|Glowny|Central Station|Station|hlavní nádraží|Centrale|Part-Dieu|Gare)$/i,'').trim();
+  const dash = s.split(/\s*-\s*/); if(dash.length>1 && dash[0].length>=4) s = dash[0];   // Budapest-Keleti -> Budapest
+  return s;
+};
+
+function selection(){
+  const done = trips.filter(t=>!t.date || t.date <= todayStr());
+  if(period==='all') return { list: done, label: 'ALL EXPEDITIONS' };
+  if(period.startsWith('j:')){
+    const j = journeys.find(x=>String(x.id)===period.slice(2));
+    if(!j) return { list: [], label: '' };
+    return { list: trips.filter(t=>t.date && t.date>=j.start && t.date<=j.end), label: j.title || '', journey: j };
+  }
+  return { list: done.filter(t=>(t.date||'').startsWith(period)), label: 'EXPEDITIONS OF '+period };
+}
+
+// ---------- проекция (Меркатор, вписываем маршрут в рамку) ----------
+const FRAME = { x:70, y:250, w:940, h:860 };
+let P = null;
+const mx = lon => lon*RAD, my = lat => Math.log(Math.tan(Math.PI/4 + Math.max(-85,Math.min(85,lat))*RAD/2));
+function fitProjection(pts){
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(const [lon,lat] of pts){ const x=mx(lon), y=my(lat); minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y); }
+  if(!pts.length){ minX=mx(-10); maxX=mx(35); minY=my(35); maxY=my(60); }
+  // минимальный охват ~3°, поля по краям
+  const minSpan = 3*RAD; let cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  let sx=Math.max(maxX-minX, minSpan)*1.35, sy=Math.max(maxY-minY, minSpan)*1.35;
+  const k = Math.min(FRAME.w/sx, FRAME.h/sy);
+  P = { k, cx, cy };
+}
+function proj(lon, lat){ return [FRAME.x + FRAME.w/2 + (mx(lon)-P.cx)*P.k, FRAME.y + FRAME.h/2 - (my(lat)-P.cy)*P.k]; }
+function pathFrom(geoms){
+  const p = new Path2D();
+  for(const poly of geoms) for(const ring of poly){ ring.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); p.closePath(); }
+  return p;
+}
+
+// ---------- примитивы ----------
+function deckled(R){   // неровный «рваный» край листа
+  ctx.beginPath(); const pad=10, step=14;
+  const j = ()=> (R()-0.5)*7;
+  ctx.moveTo(pad+j(), pad+j());
+  for(let x=pad; x<=W-pad; x+=step) ctx.lineTo(x, pad+j());
+  for(let y=pad; y<=H-pad; y+=step) ctx.lineTo(W-pad+j(), y);
+  for(let x=W-pad; x>=pad; x-=step) ctx.lineTo(x, H-pad+j());
+  for(let y=H-pad; y>=pad; y-=step) ctx.lineTo(pad+j(), y);
+  ctx.closePath();
+}
+function compass(x, y, r){
+  ctx.save(); ctx.translate(x,y);
+  ctx.strokeStyle=INK; ctx.fillStyle=INK; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(0,0,r,0,7); ctx.stroke(); ctx.beginPath(); ctx.arc(0,0,r*0.86,0,7); ctx.stroke();
+  for(let i=0;i<32;i++){ const a=i*Math.PI/16, l=i%4===0?0.16:0.08; ctx.beginPath(); ctx.moveTo(Math.cos(a)*r*0.86,Math.sin(a)*r*0.86); ctx.lineTo(Math.cos(a)*r*(0.86-l),Math.sin(a)*r*(0.86-l)); ctx.stroke(); }
+  const star = (rot, len, wdt, dark)=>{
+    for(let i=0;i<4;i++){ const a=rot+i*Math.PI/2;
+      for(const side of [-1,1]){
+        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*len, Math.sin(a)*len);
+        ctx.lineTo(Math.cos(a+side*Math.PI/4)*wdt, Math.sin(a+side*Math.PI/4)*wdt); ctx.closePath();
+        ctx.fillStyle = (side>0)===dark ? INK : '#f1e4c2'; ctx.fill(); ctx.stroke();
+      }
+    }
+  };
+  star(Math.PI/4, r*0.5, r*0.1, false);
+  star(-Math.PI/2, r*0.78, r*0.14, true);
+  ctx.font=`26px ${SC}`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=INK;
+  ctx.fillText('N', 0, -r-18);
+  ctx.restore();
+}
+
+function draw(){
+  const S = selection(), list = S.list;
+  const R = rng(hash(period+list.length) || 7);
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  deckled(R); ctx.clip();
+
+  // пергамент
+  let g = ctx.createRadialGradient(W/2,H/2,200,W/2,H/2,900);
+  g.addColorStop(0,'#f2e3bd'); g.addColorStop(0.7,PAPER); g.addColorStop(1,'#c9a86a');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  for(let i=0;i<5;i++){ // пятна
+    const x=R()*W, y=R()*H, r=60+R()*160; const sg=ctx.createRadialGradient(x,y,0,x,y,r);
+    sg.addColorStop(0,'rgba(150,110,50,0.10)'); sg.addColorStop(1,'rgba(150,110,50,0)'); ctx.fillStyle=sg; ctx.fillRect(x-r,y-r,2*r,2*r);
+  }
+  for(let i=0;i<5000;i++){ ctx.fillStyle=`rgba(90,60,20,${R()*0.07})`; ctx.fillRect(R()*W, R()*H, 1+R()*1.5, 1+R()*1.5); }
+
+  // заголовок-картуш
+  ctx.textAlign='center'; ctx.fillStyle=INK;
+  ctx.font=`26px ${TYPE}`; ctx.fillText('— THE  ROAD  DIARY  OF  A  TRAVELLER —', W/2, 92);
+  ctx.font=`76px ${SC}`; ctx.fillText(S.journey ? (S.label || 'Expedition') : 'Road Diary', W/2, 170);
+  ctx.font=`italic 30px ${SERIF}`; ctx.fillStyle=INK2;
+  const sub = S.journey ? `${fmtD(S.journey.start)} — ${fmtD(S.journey.end)}` : (period==='all' ? 'all expeditions by land & sea' : `expeditions of the year ${period}`);
+  ctx.fillText(sub, W/2, 214);
+  const sw = ctx.measureText(sub).width/2 + 24;
+  ctx.strokeStyle=INK; ctx.lineWidth=1.5;
+  for(const [a,b] of [[130, W/2-sw],[W/2+sw, W-130]]) if(b-a > 30){ ctx.beginPath(); ctx.moveTo(a,204); ctx.lineTo(b,204); ctx.stroke(); }
+
+  // рамка карты
+  const pts = list.flatMap(t => t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]]);
+  fitProjection(pts);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(FRAME.x, FRAME.y, FRAME.w, FRAME.h); ctx.clip();
+  ctx.fillStyle=SEA; ctx.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+  // волны на море
+  ctx.strokeStyle='rgba(107,84,52,0.18)'; ctx.lineWidth=1;
+  for(let y=FRAME.y+8; y<FRAME.y+FRAME.h; y+=13){ ctx.beginPath(); for(let x=FRAME.x; x<=FRAME.x+FRAME.w; x+=10){ const yy=y+Math.sin(x/22+y)*1.6; x===FRAME.x?ctx.moveTo(x,yy):ctx.lineTo(x,yy); } ctx.stroke(); }
+  if(LAND){
+    const lp = pathFrom(LAND);
+    // «береговая штриховка» — несколько обводок с затуханием
+    for(let i=5;i>=1;i--){ ctx.strokeStyle=`rgba(107,84,52,${0.06*i})`; ctx.lineWidth=i*5; ctx.stroke(lp); }
+    ctx.fillStyle=LANDC; ctx.fill(lp);
+    ctx.save(); ctx.clip(lp);
+    ctx.strokeStyle='rgba(107,84,52,0.10)'; ctx.lineWidth=1;
+    for(let k=-H; k<W; k+=9){ ctx.beginPath(); ctx.moveTo(k,FRAME.y); ctx.lineTo(k+FRAME.h,FRAME.y+FRAME.h); ctx.stroke(); }
+    ctx.restore();
+    ctx.strokeStyle=INK2; ctx.lineWidth=1.4; ctx.stroke(lp);
+  }
+  if(BORDERS){
+    ctx.save(); ctx.setLineDash([6,5]); ctx.strokeStyle='rgba(91,60,30,0.55)'; ctx.lineWidth=1.3;
+    ctx.stroke(BORDERS()); ctx.restore();
+  }
+  // градусная сетка
+  ctx.strokeStyle='rgba(91,60,30,0.22)'; ctx.lineWidth=1;
+  const step = P.k > 4000 ? 1 : P.k > 1500 ? 2 : P.k > 600 ? 5 : 10;
+  for(let lon=-180; lon<=180; lon+=step){ const [x1,y1]=proj(lon,-80), [x2,y2]=proj(lon,84); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+  for(let lat=-80; lat<=84; lat+=step){ const [x1,y1]=proj(-180,lat), [x2,y2]=proj(180,lat); ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+
+  // маршрут: красная линия с тенью
+  const ordered = [...list].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  for(const pass of ['shadow','line']){
+    for(const t of ordered){
+      const line = t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]];
+      ctx.beginPath();
+      line.forEach(([lon,lat],i)=>{ let [x,y]=proj(lon,lat); if(pass==='shadow'){ x+=3; y+=4; } i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      if(pass==='shadow'){ ctx.strokeStyle='rgba(60,30,10,0.25)'; ctx.lineWidth=9; ctx.setLineDash([]); }
+      else { ctx.strokeStyle=RED; ctx.lineWidth=7; ctx.setLineDash(t.mode==='ferry' ? [16,12] : []); }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  // значки транспорта на линии — подальше от точек городов и друг от друга
+  const stopXY = ordered.flatMap(t=>[proj(t.from.lon,t.from.lat), proj(t.to.lon,t.to.lat)]);
+  const badgeXY = [];
+  const along = (line, f)=>{   // точка на доле f длины линии (в пикселях)
+    const px = line.map(([lo,la])=>proj(lo,la)); let L=0; const seg=[];
+    for(let i=1;i<px.length;i++){ const d=Math.hypot(px[i][0]-px[i-1][0], px[i][1]-px[i-1][1]); seg.push(d); L+=d; }
+    let tgt=L*f;
+    for(let i=0;i<seg.length;i++){ if(tgt<=seg[i] || i===seg.length-1){ const r=seg[i]?Math.min(1,tgt/seg[i]):0; return [px[i][0]+(px[i+1][0]-px[i][0])*r, px[i][1]+(px[i+1][1]-px[i][1])*r]; } tgt-=seg[i]; }
+    return px[0];
+  };
+  for(const t of ordered){
+    const line = t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]];
+    let best = null, bestScore = -1;
+    for(const f of [0.5,0.4,0.6,0.32,0.68,0.25,0.75]){
+      const q = along(line, f);
+      const score = Math.min(...stopXY.map(s=>Math.hypot(s[0]-q[0], s[1]-q[1])), ...badgeXY.map(s=>Math.hypot(s[0]-q[0], s[1]-q[1])*1.2), 999);
+      if(score > 46){ best = q; break; }
+      if(score > bestScore){ bestScore = score; best = q; }
+    }
+    const [x,y] = best; badgeXY.push(best);
+    ctx.beginPath(); ctx.arc(x,y,21,0,7); ctx.fillStyle='#f3e6c4'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=RED; ctx.stroke();
+    ctx.font='22px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.globalAlpha=0.9; ctx.fillText((MODE[t.mode]||MODE.train).ico, x, y+1); ctx.globalAlpha=1;
+  }
+  // города: точки и подписи машинкой
+  const stops = new Map();
+  for(const t of ordered) for(const p of [t.from,t.to]){ const k=p.lat.toFixed(3)+','+p.lon.toFixed(3); if(!stops.has(k)) stops.set(k,p); }
+  const placed = [];
+  for(const p of stops.values()){
+    const [x,y] = proj(p.lon,p.lat);
+    ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.fillStyle=INK; ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y,4,0,7); ctx.fillStyle='#f3e6c4'; ctx.fill();
+    const name = shortName(p.name).toUpperCase();
+    ctx.font=`30px ${TYPE}`; ctx.textBaseline='alphabetic';
+    const tw = ctx.measureText(name).width;
+    let ly = y-20, lx = x;
+    if(placed.some(q=>Math.abs(q[0]-lx)<(tw+q[2])/2 && Math.abs(q[1]-ly)<34)) ly = y+44;
+    if(placed.some(q=>Math.abs(q[0]-lx)<(tw+q[2])/2 && Math.abs(q[1]-ly)<34)) continue;
+    lx = Math.max(FRAME.x+tw/2+8, Math.min(FRAME.x+FRAME.w-tw/2-8, lx));
+    ctx.textAlign='center';
+    ctx.lineWidth=6; ctx.strokeStyle='rgba(234,217,176,0.9)'; ctx.strokeText(name, lx, ly);
+    ctx.fillStyle=INK; ctx.fillText(name, lx, ly);
+    placed.push([lx,ly,tw]);
+  }
+  if(!list.length){
+    ctx.textAlign='center'; ctx.fillStyle=INK2; ctx.font=`italic 40px ${SERIF}`;
+    ctx.fillText('No expeditions recorded yet…', W/2, FRAME.y+FRAME.h/2);
+  }
+  ctx.restore();
+
+  // двойная рамка карты
+  ctx.strokeStyle=INK; ctx.lineWidth=3; ctx.strokeRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+  ctx.lineWidth=1.2; ctx.strokeRect(FRAME.x-8, FRAME.y-8, FRAME.w+16, FRAME.h+16);
+  // роза ветров
+  compass(FRAME.x+FRAME.w-90, FRAME.y+FRAME.h-100, 64);
+
+  // журнал внизу
+  const km = list.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
+  const ccs = new Set(list.flatMap(t=>[t.from.cc,t.to.cc]).filter(Boolean));
+  const stat = [[Math.round(km).toLocaleString('en-US').replace(/,/g,' '), 'MILES? NO — KM'], [list.length, list.length===1?'JOURNEY':'JOURNEYS'], [ccs.size, ccs.size===1?'COUNTRY':'COUNTRIES'], [stops.size, 'STOPS']];
+  stat[0][1] = 'KILOMETRES';
+  const cols = [190, 430, 650, 870];
+  ctx.textAlign='center';
+  stat.forEach(([v,l],i)=>{
+    ctx.fillStyle=INK; ctx.font=`60px ${SC}`; ctx.fillText(String(v), cols[i], 1215);
+    ctx.fillStyle=INK2; ctx.font=`20px ${TYPE}`; ctx.fillText(l, cols[i], 1248);
+  });
+  ctx.strokeStyle=INK; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(110,1275); ctx.lineTo(W-110,1275); ctx.stroke();
+  // способы передвижения
+  const modes = [...new Set(list.map(t=>t.mode))].map(m=>(MODE[m]||MODE.train).name);
+  ctx.fillStyle=INK2; ctx.font=`italic 28px ${SERIF}`;
+  ctx.fillText(modes.length ? 'by ' + modes.join(' · ').toLowerCase() : '', W/2, 1316);
+  // штамп
+  ctx.save(); ctx.translate(180, 1340); ctx.rotate(-0.18);
+  ctx.strokeStyle='rgba(179,38,30,0.75)'; ctx.fillStyle='rgba(179,38,30,0.75)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.ellipse(0,0,105,46,0,0,7); ctx.stroke(); ctx.beginPath(); ctx.ellipse(0,0,95,37,0,0,7); ctx.stroke();
+  ctx.font=`22px ${TYPE}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('ROAD DIARY', 0, -8); ctx.font=`16px ${TYPE}`; ctx.fillText(period==='all'?'ALL TIME':period.startsWith('j:')?'EXPEDITION':period, 0, 16);
+  ctx.restore();
+  ctx.textAlign='right'; ctx.fillStyle=INK2; ctx.font=`20px ${TYPE}`; ctx.textBaseline='alphabetic';
+  ctx.fillText(`CHARTED ${fmtD(todayStr()).toUpperCase()}`, W-110, 1380);
+
+  // виньетка
+  g = ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.75);
+  g.addColorStop(0,'rgba(80,50,15,0)'); g.addColorStop(1,'rgba(80,50,15,0.35)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.restore();
+  // край листа
+  deckled(rng(hash(period+list.length) || 7)); ctx.strokeStyle='rgba(90,60,20,0.5)'; ctx.lineWidth=2; ctx.stroke();
+}
+
+
+  const FONT_URL = 'https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=IM+Fell+English:ital@0;1&family=Special+Elite&display=swap';
+  function loadGeo(){
+    if(geoLoading) return geoLoading;
+    geoLoading = (async ()=>{
+      if(!document.querySelector(`link[href="${FONT_URL}"]`)){ const l=document.createElement('link'); l.rel='stylesheet'; l.href=FONT_URL; document.head.appendChild(l); }
+      await loadScriptOnce('lib/topojson-client.min.js');
+      const [land, countries] = await Promise.all([
+        fetch('lib/land-50m.json').then(r=>r.json()).catch(()=>null),
+        fetch('lib/countries-50m.json').then(r=>r.json()).catch(()=>null)
+      ]);
+      if(land){ const f=topojson.feature(land, land.objects.land); LAND = f.features.flatMap(x=>x.geometry.type==='Polygon'?[x.geometry.coordinates]:x.geometry.coordinates); }
+      if(countries){
+        const mesh = topojson.mesh(countries, countries.objects.countries, (a,b)=>a!==b);
+        BORDERS = ()=>{ const p=new Path2D(); for(const line of mesh.coordinates){ line.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); } return p; };
+      }
+    })().catch(()=>{ geoLoading = null; });
+    return geoLoading;
+  }
+  ShareCards.road = {
+    title: 'Карта <span>экспедиции</span>', hint: 'Наземные поездки: поезд, автобус, машина, паром.',
+    w: W, h: H,
+    periods(){
+      const doneT = trips.filter(t=>!t.date || t.date <= todayStr());
+      const years = [...new Set(doneT.filter(t=>t.date).map(t=>t.date.slice(0,4)))].sort().reverse();
+      const js = journeys.filter(j=>trips.some(t=>t.date && t.date>=j.start && t.date<=j.end)).sort((a,b)=>b.start.localeCompare(a.start));
+      return [['all','Всё время'], ...years.map(y=>[y,y]), ...js.map(j=>['j:'+j.id, '🧳 '+(j.title || j.countries.join(', '))])];
+    },
+    async prepare(){
+      await loadGeo();
+      await Promise.race([Promise.all(['76px "IM Fell English SC"','italic 30px "IM Fell English"','30px "Special Elite"'].map(f=>document.fonts.load(f).catch(()=>{}))), new Promise(r=>setTimeout(r,3000))]);
+    },
+    draw(p){ period = p; draw(); },
+    name(p){ return `road-diary-${p.replace(':','-')}.png`; },
+  };
+})();
+
+// ======================================================================
+//  Карта стран — «Поделиться» на странице Country
+// ======================================================================
+(()=>{
+const W = 1080, H = 1350, RAD = Math.PI/180;
+const cv = document.getElementById('passCv'), ctx = cv.getContext('2d');
+const BY = BY_IATA; let PARTS = {}, LANDPOLYS = [], period = 'all', theme = 'light';
+
+const THEMES = {
+  light: { bg:'#f4f2ec', land:'#d9d5cc', border:'#f4f2ec', fill:'#22c55e', text:'#1d2433', muted:'#7b8190', rule:'#d9d5cc' },
+  dark:  { bg:'#0f1424', land:'#2a3149', border:'#0f1424', fill:'#34d399', text:'#eef1f8', muted:'#8a93a8', rule:'#2a3149' },
+  sand:  { bg:'#efe6d4', land:'#d8c9aa', border:'#efe6d4', fill:'#c2410c', text:'#3b2a17', muted:'#8a7558', rule:'#d8c9aa' },
+};
+const THEME_NAMES = { light:'Светлая', dark:'Тёмная', sand:'Песок' };
+
+function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+const done = x => !x.date || x.date <= todayStr();
+function dist(a,b){ const dLat=(b.lat-a.lat)*RAD, dLon=(b.lon-a.lon)*RAD; const h=Math.sin(dLat/2)**2+Math.cos(a.lat*RAD)*Math.cos(b.lat*RAD)*Math.sin(dLon/2)**2; return 2*6371*Math.asin(Math.sqrt(h)); }
+const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+function fmtD(s){ const [y,m,d]=s.split('-'); return `${+d} ${MON[+m-1]} ${y}`; }
+
+// ---------- что выбрано ----------
+function selection(){
+  let F = flights.filter(f=>BY[f.from] && BY[f.to] && done(f)), T = trips.filter(done), J = journeys.filter(j=>j.start <= todayStr());
+  let title = 'All time', sub = '';
+  if(period.startsWith('j:')){
+    const j = journeys.find(x=>String(x.id)===period.slice(2));
+    if(j){
+      F = F.filter(f=>f.date && f.date>=j.start && f.date<=j.end);
+      T = T.filter(t=>t.date && t.date>=j.start && t.date<=j.end);
+      J = [j]; title = j.title || 'Journey'; sub = `${fmtD(j.start)} — ${fmtD(j.end)}`;
+    }
+  } else if(period!=='all'){
+    F = F.filter(f=>(f.date||'').startsWith(period)); T = T.filter(t=>(t.date||'').startsWith(period));
+    J = J.filter(j=>j.start.startsWith(period)); title = period;
+  }
+  // точки посещений по странам
+  const pts = {}, last = {};
+  const add = (cc,lon,lat,date)=>{ if(!cc) return; (pts[cc] ||= []); if(lon!=null) pts[cc].push([lon,lat]); if(date && (!last[cc] || date>last[cc])) last[cc]=date; };
+  const isJourney = period.startsWith('j:');
+  for(const f of F){ const a=BY[f.from], b=BY[f.to]; if(!isJourney) add(a.country,a.lon,a.lat,f.date); add(b.country,b.lon,b.lat,f.date); }
+  for(const t of T){ if(!isJourney) add(t.from.cc,t.from.lon,t.from.lat,t.date); add(t.to.cc,t.to.lon,t.to.lat,t.date); }
+  if(isJourney){   // для путешествия — только его страны
+    const keep = new Set(J[0]?.countries || []);
+    for(const k of Object.keys(pts)) if(!keep.has(k)) delete pts[k];
+  }
+  for(const j of J) for(const cc of j.countries) add(cc,null,null,j.end);
+  const km = F.reduce((s,f)=>s+dist(BY[f.from],BY[f.to]),0) + T.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
+  return { pts, last, F, T, J, title, sub, km };
+}
+
+// ---------- проекция Equal Earth ----------
+const A1=1.340264, A2=-0.081106, A3=0.000893, A4=0.003796, M=Math.sqrt(3)/2;
+function ee(lon, lat){
+  const l=lon*RAD, t=Math.asin(M*Math.sin(Math.max(-90,Math.min(90,lat))*RAD)), t2=t*t, t6=t2*t2*t2;
+  return [ 2*Math.sqrt(3)*l*Math.cos(t) / (3*(A1+3*A2*t2+t6*(7*A3+9*A4*t2))), t*(A1+A2*t2+t6*(A3+A4*t2)) ];
+}
+const MAP = { x:20, y:250, w:1040, h:500 };          // рамка карты
+const EX = ee(180,0)[0], YT = ee(0,84)[1], YB = ee(0,-58)[1];
+const K = MAP.w/(2*EX);
+let V = null;   // текущий вид: масштаб и смещение
+function worldView(){ const h=(YT-YB)*K; return { k:K, ox:MAP.x+MAP.w/2, oy:MAP.y+(MAP.h-h)/2+YT*K, world:true }; }
+function zoomView(parts){
+  let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity;
+  for(const p of parts) for(const [lon,lat] of p.rings[0]){ const [x,y]=ee(Math.max(-180,Math.min(180,lon)),lat); a=Math.min(a,x); c=Math.max(c,x); b=Math.min(b,y); d=Math.max(d,y); }
+  const minSpan = 0.18;   // не приближаем сильнее, чем ~10°
+  const cx=(a+c)/2, cy=(b+d)/2, bw=Math.max(c-a,minSpan)*1.5, bh=Math.max(d-b,minSpan)*1.5;
+  const k = Math.min(MAP.w/bw, MAP.h/bh);
+  return { k, ox: MAP.x+MAP.w/2 - cx*k, oy: MAP.y+MAP.h/2 + cy*k, world:false };
+}
+function proj(lon, lat){ const [x,y]=ee(lon,lat); return [V.ox + x*V.k, V.oy - y*V.k]; }
+function outline(){   // граница «мира» в проекции — чтобы обрезать копии полигонов за ±180°
+  const p = new Path2D();
+  for(let lat=-90; lat<=90; lat+=2){ const [x,y]=proj(-180,lat); lat===-90?p.moveTo(x,y):p.lineTo(x,y); }
+  for(let lat=90; lat>=-90; lat-=2){ const [x,y]=proj(180,lat); p.lineTo(x,y); }
+  p.closePath(); return p;
+}
+function addRings(p, rings){
+  for(const ring of rings){
+    const minL=Math.min(...ring.map(q=>q[0])), maxL=Math.max(...ring.map(q=>q[0]));
+    const shifts=[0]; if(maxL>180) shifts.push(-360); if(minL<-180) shifts.push(360);
+    for(const sh of shifts){ ring.forEach(([lon,lat],i)=>{ const [x,y]=proj(lon+sh,lat); i?p.lineTo(x,y):p.moveTo(x,y); }); p.closePath(); }
+  }
+}
+
+// ---------- геометрия стран (как на основном сайте) ----------
+function unwrapRing(ring){ let prev=null; return ring.map(([lon,lat])=>{ if(prev!==null){ while(lon-prev>180) lon-=360; while(lon-prev<-180) lon+=360; } prev=lon; return [lon,lat]; }); }
+function ringArea(r){ let a=0; for(let i=0,j=r.length-1;i<r.length;j=i++) a+=(r[j][0]+r[i][0])*(r[j][1]-r[i][1]); return a/2; }
+function inRing(x,y,r){ let ins=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const [xi,yi]=r[i],[xj,yj]=r[j]; if(((yi>y)!==(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
+function partHas(p,lon,lat){ for(const x of [lon,lon+360,lon-360]){ const [a,b,c,d]=p.bbox; if(x<a||x>c||lat<b||lat>d) continue; if(inRing(x,lat,p.rings[0])) return true; } return false; }
+function partDist(p,lon,lat){ let best=Infinity; const r=p.rings[0], st=Math.max(1,Math.floor(r.length/200)); for(let i=0;i<r.length;i+=st) for(const x of [lon,lon+360,lon-360]){ const d=(r[i][0]-x)**2+(r[i][1]-lat)**2; if(d<best) best=d; } return best; }
+function visitedParts(pts){
+  const out = [];
+  for(const [cc, list] of Object.entries(pts)){
+    const parts = PARTS[cc]; if(!parts) continue;
+    const used = new Set();
+    for(const [lon,lat] of list){
+      let i = parts.findIndex(p=>partHas(p,lon,lat));
+      if(i<0){ let bd=Infinity; parts.forEach((p,k)=>{ const d=partDist(p,lon,lat); if(d<bd){ bd=d; i=k; } }); }
+      if(i>=0) used.add(i);
+    }
+    let main=0; parts.forEach((p,k)=>{ if(p.area>parts[main].area) main=k; }); used.add(main);
+    for(const i of used) out.push(parts[i]);
+  }
+  return out;
+}
+
+// ---------- рисование ----------
+function draw(){
+  const T_ = THEMES[theme], S = selection();
+  const visited = Object.keys(S.pts).filter(cc=>PARTS[cc]);
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(0,0,W,H,40) : ctx.rect(0,0,W,H); ctx.clip();
+  ctx.fillStyle=T_.bg; ctx.fillRect(0,0,W,H);
+
+  // заголовок
+  ctx.fillStyle=T_.muted; ctx.font='600 24px Inter, sans-serif'; ctx.textAlign='left';
+  ctx.fillText('DIARY  COUNTRY', 60, 96);
+  ctx.fillStyle=T_.text; ctx.font='800 72px Inter, sans-serif';
+  ctx.fillText(S.title, 56, 172);
+  if(S.sub){ ctx.fillStyle=T_.muted; ctx.font='500 28px Inter, sans-serif'; ctx.fillText(S.sub, 60, 214); }
+  ctx.textAlign='right'; ctx.fillStyle=T_.fill; ctx.font='800 72px Inter, sans-serif';
+  ctx.fillText(String(visited.length), W-60, 172);
+  ctx.fillStyle=T_.muted; ctx.font='600 24px Inter, sans-serif';
+  ctx.fillText(visited.length===1 ? 'COUNTRY' : 'COUNTRIES', W-60, 96);
+  ctx.textAlign='left';
+
+  // карта: весь мир, а для путешествия или пары стран — приближение к ним
+  const vparts = visitedParts(S.pts);
+  const zoom = vparts.length && (period.startsWith('j:') || visited.length <= 3);
+  V = zoom ? zoomView(vparts.filter(p=>Math.abs(p.bbox[2]-p.bbox[0])<200)) : worldView();
+  ctx.save();
+  if(V.world) ctx.clip(outline());
+  else { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(MAP.x+20,MAP.y,MAP.w-40,MAP.h,24) : ctx.rect(MAP.x+20,MAP.y,MAP.w-40,MAP.h); ctx.clip(); }
+  const land = new Path2D(); for(const poly of LANDPOLYS) addRings(land, poly);
+  ctx.fillStyle=T_.land; ctx.fill(land);
+  const vis = new Path2D(); for(const p of vparts) addRings(vis, p.rings);
+  ctx.fillStyle=T_.fill; ctx.fill(vis);
+  // тонкие границы поверх, чтобы соседние страны читались
+  ctx.strokeStyle=T_.border; ctx.lineWidth=V.world ? 1.1 : 2; ctx.stroke(land);
+  ctx.restore();
+
+  // флаги посещённых стран — от последней к первой
+  const flagsOrder = [...visited].sort((a,b)=>(S.last[b]||'').localeCompare(S.last[a]||''));
+  const perRow = 15, R = 26, gap = 62, maxFlags = perRow*2;
+  const shown = flagsOrder.slice(0, flagsOrder.length > maxFlags ? maxFlags-1 : maxFlags);
+  const extra = flagsOrder.length - shown.length;
+  const items = [...shown.map(cc=>({cc})), ...(extra>0 ? [{more:extra}] : [])];
+  const rows = Math.ceil(items.length/perRow), fy0 = MAP.y + MAP.h + 75;
+  items.forEach((it,i)=>{
+    const r = Math.floor(i/perRow), inRow = Math.min(perRow, items.length - r*perRow);
+    const x = W/2 - (inRow-1)*gap/2 + (i%perRow)*gap, y = fy0 + r*72;
+    ctx.save(); ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fillStyle = it.more ? T_.fill : '#fff'; ctx.fill(); ctx.clip();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    if(it.more){ ctx.fillStyle = theme==='light' ? '#06210f' : '#fff'; ctx.font='700 20px Inter, sans-serif'; ctx.fillText('+'+it.more, x, y+1); }
+    else { ctx.font='60px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.fillText(String.fromCodePoint(...[...it.cc].map(c=>0x1F1E6+c.charCodeAt(0)-65)), x, y+3); }
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.strokeStyle=T_.bg; ctx.lineWidth=4; ctx.stroke();
+  });
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+
+  // статистика в линию
+  const pct = Math.round(visited.length/195*100);
+  const stats = [
+    [String(visited.length), visited.length===1?'country':'countries'],
+    [pct+'%', 'of the world'],
+    [String(S.F.length), S.F.length===1?'flight':'flights'],
+    [String(S.T.length), S.T.length===1?'road trip':'road trips'],
+    [Math.round(S.km).toLocaleString('en-US').replace(/,/g,' '), 'km travelled'],
+  ];
+  const y0 = 1135, colW = (W-120)/stats.length;
+  ctx.strokeStyle=T_.rule; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(60, y0-70); ctx.lineTo(W-60, y0-70); ctx.stroke();
+  stats.forEach(([v,l],i)=>{
+    const cx = 60 + colW*i + colW/2;
+    ctx.textAlign='center';
+    ctx.fillStyle=T_.text; ctx.font=`800 ${v.length>6?40:52}px Inter, sans-serif`; ctx.fillText(v, cx, y0);
+    ctx.fillStyle=T_.muted; ctx.font='500 22px Inter, sans-serif'; ctx.fillText(l, cx, y0+38);
+    if(i){ ctx.strokeStyle=T_.rule; ctx.beginPath(); ctx.moveTo(60+colW*i, y0-44); ctx.lineTo(60+colW*i, y0+40); ctx.stroke(); }
+  });
+  ctx.textAlign='left'; ctx.fillStyle=T_.muted; ctx.font='500 20px Inter, sans-serif';
+  ctx.fillText('Travel Diary', 60, H-60);
+  ctx.textAlign='right'; ctx.fillText(fmtD(todayStr()).toUpperCase(), W-60, H-60);
+  ctx.restore();
+}
+
+
+  ShareCards.country = {
+    title: 'Карта <span>стран</span>', hint: 'Страны из перелётов, поездок и путешествий. Острова и заморские территории — только если вы там были.',
+    w: W, h: H,
+    periods(){
+      const dates = [...flights, ...trips].filter(x=>x.date && done(x)).map(x=>x.date.slice(0,4)).concat(journeys.map(j=>j.start.slice(0,4)));
+      const years = [...new Set(dates)].sort().reverse();
+      const js = [...journeys].sort((a,b)=>b.start.localeCompare(a.start));
+      return [['all','Всё время'], ...years.map(y=>[y,y]), ...js.map(j=>['j:'+j.id, '🧳 '+(j.title || j.countries.join(', '))])];
+    },
+    options: { items: Object.keys(THEMES).map(k=>[k, THEME_NAMES[k]]), get: ()=>theme, set: v=>{ theme = v; try{ localStorage.setItem('flights.countryTheme', v); }catch(e){} } },
+    async prepare(){
+      try{ const t = localStorage.getItem('flights.countryTheme'); if(THEMES[t]) theme = t; }catch(e){}
+      await loadCountries();
+      PARTS = COUNTRY_PARTS;
+      LANDPOLYS = Object.entries(PARTS).filter(([k])=>k!=='AQ').flatMap(([,ps])=>ps.map(p=>p.rings));
+      await Promise.race([Promise.all(['800 50px Inter','600 30px Inter','500 30px Inter'].map(f=>document.fonts.load(f).catch(()=>{}))), new Promise(r=>setTimeout(r,2500))]);
+    },
+    draw(p){ period = p; draw(); },
+    name(p){ return `diary-country-${p.replace(':','-')}.png`; },
+  };
+})();
+
+// ======================================================================
+//  Окно «Поделиться»: своя картинка для каждой страницы
+// ======================================================================
+const ShareModal = (()=>{
+  const modal = document.getElementById('passportModal'), cv = document.getElementById('passCv');
+  const pcard = document.querySelector('#passportModal .pcard');
+  let card = null, period = 'all';
+  function chips(){
+    document.getElementById('passPeriods').innerHTML = card.periods()
+      .map(([v,l])=>`<button type="button" data-p="${v}" class="${v===period?'on':''}">${esc(l)}</button>`).join('');
+    const th = document.getElementById('passThemes');
+    th.hidden = !card.options;
+    if(card.options) th.innerHTML = card.options.items.map(([v,l])=>`<button type="button" data-o="${v}" class="${v===card.options.get()?'on':''}">${l}</button>`).join('');
+  }
+  async function open(key){
+    card = ShareCards[key];
+    const ps = card.periods().map(x=>x[0]);
+    period = (/^\d{4}$/.test(yearFilter) && ps.includes(yearFilter)) ? yearFilter : 'all';
+    if(key==='country' && selJourney!=null && ps.includes('j:'+selJourney)) period = 'j:'+selJourney;
+    document.querySelector('#passportModal .phead h2').innerHTML = card.title;
+    document.querySelector('#passportModal .phint').textContent = card.hint;
+    cv.width = card.w; cv.height = card.h; pcard.style.aspectRatio = `${card.w}/${card.h}`;
     modal.hidden = false; document.body.classList.add('modal-open');
     document.getElementById('passLoading').hidden = false;
     document.getElementById('passSave').disabled = true;
-    renderPeriods();
-    await Promise.race([
-      Promise.all([loadLand(), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]),
-      new Promise(r=>setTimeout(r,4000))
-    ]);
-    draw();
+    chips();
+    await Promise.race([card.prepare(), new Promise(r=>setTimeout(r,6000))]);
+    card.draw(period);
     document.getElementById('passLoading').hidden = true;
     document.getElementById('passSave').disabled = false;
   }
   function close(){ modal.hidden = true; document.body.classList.remove('modal-open'); }
-
+  document.getElementById('passPeriods').addEventListener('click', e=>{
+    const b = e.target.closest('[data-p]'); if(!b || !card) return; period = b.dataset.p; chips(); card.draw(period);
+  });
+  document.getElementById('passThemes').addEventListener('click', e=>{
+    const b = e.target.closest('[data-o]'); if(!b || !card?.options) return; card.options.set(b.dataset.o); chips(); card.draw(period);
+  });
   document.getElementById('passClose').onclick = close;
   modal.addEventListener('click', e=>{ if(e.target===modal) close(); });
   addEventListener('keydown', e=>{ if(e.key==='Escape' && !modal.hidden) close(); });
   document.getElementById('passSave').onclick = async ()=>{
-    const name = `boarding-pass-${period}.png`;
-    // PNG сохраняет прозрачность: скруглённые углы и вырезы остаются
+    const name = card.name(period);
+    // PNG сохраняет прозрачность: скругления, вырезы и рваные края остаются
     const blob = await new Promise(r=>cv.toBlob(r,'image/png'));
     const file = new File([blob], name, {type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
@@ -1894,7 +2418,7 @@ function draw(){
   };
   return { open };
 })();
-document.getElementById('shareBtn').onclick = ()=> Passport.open();
+document.getElementById('shareBtn').onclick = ()=> ShareModal.open(['fly','road','country'][page]);
 </script>
 </body>
 </html>
