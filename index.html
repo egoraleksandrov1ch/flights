@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#05070d">
 <title>Мои перелёты</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -16,8 +15,8 @@
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   [hidden]{display:none!important}
-  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
-  #map,#globe{position:fixed;top:0;left:0;right:0;height:100%;background:var(--bg)}
+  html,body{margin:0;height:100%;min-height:100lvh;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif;overflow:hidden;overscroll-behavior:none}
+  #map,#globe{position:fixed;top:0;left:0;right:0;height:100%;height:100lvh;background:var(--bg)}
 
   /* ---------- Panel (desktop) ---------- */
   .panel{position:fixed;top:16px;left:16px;bottom:16px;width:360px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
@@ -96,6 +95,9 @@
   .menu button.on{color:var(--accent)}
   .menu button.on::after{content:"✓";margin-left:auto}
   .menu hr{border:0;border-top:1px solid var(--line);margin:6px 4px}
+  .menu .cnt{color:var(--muted);font-size:12px;margin-left:auto}
+  .menu button.on .cnt{display:none}
+  #yearMenu{max-height:60vh;overflow:auto}
 
   .maplibregl-popup-content{background:#121827;color:var(--text);border-radius:10px;padding:10px 12px;font:13px Inter,system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4)}
   .maplibregl-popup-tip{border-top-color:#121827!important;border-bottom-color:#121827!important}
@@ -107,6 +109,11 @@
     .panel{top:auto;left:0;right:0;bottom:0;width:auto;height:88dvh;border-radius:18px 18px 0 0;border-bottom:0;
       transform:translateY(var(--sheet-y,50%));transition:transform .32s cubic-bezier(.2,.8,.2,1);padding-bottom:var(--safe-b)}
     .panel.dragging{transition:none}
+    /* шторка продолжается вниз под панель Safari — без чёрной полосы */
+    .panel::after{content:"";position:absolute;left:0;right:0;top:100%;height:50vh;background:#0e121e}
+    .panel{overflow:visible}
+    .panel > .list{overflow:auto}
+    html,body{background:#0e121e}
     .panel.hidden{transform:translateY(var(--sheet-y,50%))}
     .sheet-top{touch-action:none;cursor:grab}
     .grip{display:block;width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.25);margin:8px auto 0}
@@ -128,6 +135,7 @@
     footer{padding:10px 16px 12px}
     .ctrls{top:calc(var(--safe-t) + 12px);right:12px}
     .ctrls button{padding:8px 11px}
+    .ctrls .lbl{display:none}
   }
 </style>
 </head>
@@ -177,7 +185,11 @@
 <button class="toggle" id="showBtn">☰ Перелёты</button>
 
 <div class="ctrls">
-  <button id="rotateBtn" type="button">⟳ Вращение</button>
+  <div class="layers" id="years">
+    <button id="yearBtn" type="button">📅 Всё время</button>
+    <div class="menu" id="yearMenu"></div>
+  </div>
+  <button id="rotateBtn" type="button" title="Вращение">⟳<span class="lbl"> Вращение</span></button>
   <div class="layers" id="layers">
     <button id="layersBtn" type="button">🗺 Карта</button>
     <div class="menu" id="menu">
@@ -388,9 +400,8 @@ function updateMap(){
 }
 function focusMap(d){
   const lons=d.line.map(c=>c[0]), lats=d.line.map(c=>c[1]);
-  const desk = !isMobile() && !panel.classList.contains('hidden');
   map.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]],
-    {padding:{top:70,bottom:40,left: desk ? 410 : 40, right:40}, maxZoom:6.5, duration:1200});
+    {padding:40, maxZoom:6.5, duration:1200});
 }
 function setMapStyle(){
   mapReady = false;
@@ -460,7 +471,7 @@ function focusGlobe(d){
 //  Переключение видов
 // ======================================================================
 const layersEl = document.getElementById('layers');
-document.getElementById('layersBtn').onclick = e=>{ e.stopPropagation(); layersEl.classList.toggle('open'); };
+document.getElementById('layersBtn').onclick = e=>{ e.stopPropagation(); yearsEl.classList.remove('open'); layersEl.classList.toggle('open'); };
 document.addEventListener('click', e=>{ if(!layersEl.contains(e.target)) layersEl.classList.remove('open'); });
 document.querySelectorAll('[data-view]').forEach(b=> b.onclick = ()=>{ setView(b.dataset.view); layersEl.classList.remove('open'); });
 document.getElementById('dayNightBtn').onclick = ()=>{
@@ -507,10 +518,52 @@ function selectFlight(id){
 }
 document.getElementById('selClose').onclick = e=>{ e.stopPropagation(); selected=null; render(); };
 
+// ---------- Фильтр по годам ----------
+const yearsEl = document.getElementById('years'), yearMenu = document.getElementById('yearMenu');
+function yearLabel(y){ return y==='all' ? 'Всё время' : y==='none' ? 'Без даты' : y; }
+function renderYears(){
+  const counts = {};
+  for(const f of flights) counts[yearOf(f)] = (counts[yearOf(f)]||0)+1;
+  if(yearFilter!=='all' && !counts[yearFilter]){ yearFilter='all'; lsSet('flights.year','all'); }
+  const ys = Object.keys(counts).filter(y=>y!=='none').sort((a,b)=>b.localeCompare(a));
+  if(counts.none) ys.push('none');
+  const item = (y,n)=>`<button type="button" data-year="${y}" class="${y===yearFilter?'on':''}">${yearLabel(y)}<span class="cnt">${n}</span></button>`;
+  yearMenu.innerHTML = item('all', flights.length) + (ys.length?'<hr>':'') + ys.map(y=>item(y,counts[y])).join('');
+  document.getElementById('yearBtn').textContent = '📅 ' + yearLabel(yearFilter);
+}
+document.getElementById('yearBtn').onclick = e=>{ e.stopPropagation(); layersEl.classList.remove('open'); yearsEl.classList.toggle('open'); };
+yearMenu.addEventListener('click', e=>{
+  const b = e.target.closest('[data-year]'); if(!b) return;
+  yearFilter = b.dataset.year; lsSet('flights.year', yearFilter);
+  yearsEl.classList.remove('open');
+  selected = null; render();
+  fitAll();
+});
+document.addEventListener('click', e=>{ if(!yearsEl.contains(e.target)) yearsEl.classList.remove('open'); });
+// показать все перелёты выбранного периода
+function fitAll(){
+  if(!ARCS.length) return;
+  rotating=false; rotBtnUpdate();
+  if(view==='globe3d'){
+    if(!globe) return;
+    const a = ARCS.flatMap(d=>[d.a,d.b]);
+    const lat = a.reduce((s,p)=>s+p.lat,0)/a.length, lng = a.reduce((s,p)=>s+p.lon,0)/a.length;
+    globe.pointOfView({lat, lng, altitude:2}, 1200); return;
+  }
+  if(!map) return;
+  const pts = ARCS.flatMap(d=>d.line);
+  const lons = pts.map(c=>c[0]), lats = pts.map(c=>c[1]);
+  map.fitBounds([[Math.min(...lons),Math.min(...lats)],[Math.max(...lons),Math.max(...lats)]], {padding:40, maxZoom:6, duration:1200});
+}
+
 // ---------- Render ----------
+let yearFilter = lsGet('flights.year','all');
+const yearOf = f => f.date ? f.date.slice(0,4) : 'none';
 function render(){
+  renderYears();
   const arcs = [], used = {};
   for(const f of flights){
+    if(yearFilter!=='all' && yearOf(f)!==yearFilter) continue;
     const a=BY_IATA[f.from], b=BY_IATA[f.to];
     if(!a||!b) continue;
     arcs.push({...f, a, b, km: dist(a,b), line: greatCircle(a,b)});
@@ -536,7 +589,7 @@ function render(){
   updatePeek();
 
   const list = document.getElementById('list');
-  if(!arcs.length){ list.innerHTML = '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на карте.</div>'; return; }
+  if(!arcs.length){ list.innerHTML = flights.length ? '<div class="empty">За этот период перелётов нет.</div>' : '<div class="empty">Пока нет перелётов.<br>Нажмите «Добавить» — перелёт появится линией на карте.</div>'; return; }
   const sorted = [...arcs].sort((x,y)=> (y.date||'').localeCompare(x.date||'') || y.id-x.id);
   let lastYear = null, html = '';
   for(const f of sorted){
@@ -651,8 +704,8 @@ document.getElementById('clearBtn').onclick = ()=>{
 
 // ---------- Panel / rotation ----------
 const panel=document.getElementById('panel');
-document.getElementById('hideBtn').onclick=()=>panel.classList.add('hidden');
-document.getElementById('showBtn').onclick=()=>panel.classList.remove('hidden');
+document.getElementById('hideBtn').onclick=()=>{ panel.classList.add('hidden'); applySheet(); };
+document.getElementById('showBtn').onclick=()=>{ panel.classList.remove('hidden'); applySheet(); };
 const rotBtn=document.getElementById('rotateBtn');
 function rotBtnUpdate(){
   rotBtn.style.color = rotating ? 'var(--accent)' : '';
@@ -668,7 +721,7 @@ rotBtn.onclick=()=>{
 let sheet = 'half';
 const sheetTop = document.getElementById('sheetTop');
 function sheetH(){ return panel.getBoundingClientRect().height; }
-function peekH(){ return sheetTop.offsetHeight + 4; }
+function peekH(){ return sheetTop.offsetHeight + 4 + (parseFloat(getComputedStyle(panel).paddingBottom)||0); }
 function visibleFor(state){
   const H = sheetH();
   if(state==='peek') return peekH();
@@ -676,18 +729,30 @@ function visibleFor(state){
   return Math.min(H, Math.max(peekH()+180, innerHeight*0.5));
 }
 function applySheet(){
-  if(!isMobile()){ panel.style.removeProperty('--sheet-y'); sizeView(innerHeight); return; }
+  if(!isMobile()){
+    panel.style.removeProperty('--sheet-y');
+    setMapInsets(panel.classList.contains('hidden') ? 0 : 392, 0);
+    sizeGlobe(innerHeight); return;
+  }
   const vis = visibleFor(sheet);
   panel.style.setProperty('--sheet-y', (sheetH()-vis)+'px');
-  // карта занимает видимую часть экрана над шторкой — маршрут оказывается по центру
-  sizeView(innerHeight - (sheet==='full' ? visibleFor('half') : vis) + 16);
+  const covered = sheet==='full' ? visibleFor('half') : vis;
+  // карта занимает весь экран (под шторкой и статус-баром), а центр смещается в видимую часть
+  setMapInsets(0, covered);
+  sizeGlobe(innerHeight - covered + 16);
+}
+function setMapInsets(left, bottom){
+  if(!map) return;
+  const top = isMobile() ? 56 : 0;
+  const p = map.getPadding();
+  if(p.left===left && p.bottom===bottom && p.top===top) return;
+  map.easeTo({padding:{left, bottom, top, right:0}, duration: mapReady ? 300 : 0});
 }
 function setSheet(state){ sheet = state; applySheet(); }
 function updatePeek(){ if(isMobile() && sheet==='peek') applySheet(); }
-function sizeView(h){
+function sizeGlobe(h){
   h = Math.max(200, Math.round(h));
-  for(const id of ['map','globe']) document.getElementById(id).style.height = h+'px';
-  if(map) map.resize();
+  document.getElementById('globe').style.height = h+'px';
   if(globe) globe.width(innerWidth).height(h);
 }
 
