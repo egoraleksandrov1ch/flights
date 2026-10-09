@@ -1124,12 +1124,15 @@ function renderCountries(){
     if(!cc) return;
     const c = m[cc] || (m[cc] = {cc, arrivals:0, places:new Set(), first:null, last:null, air:false, ground:false});
     if(arrival) c.arrivals++;
-    c.places.add(place);
+    if(place) c.places.add(place);
     if(date){ if(!c.first || date<c.first) c.first=date; if(!c.last || date>c.last) c.last=date; }
     if(byAir) c.air = true; else c.ground = true;
   };
   for(const a of ARCS) if(!a.up){ add(a.a.country, a.date, a.a.iata, false, true); add(a.b.country, a.date, a.b.iata, true, true); }
-  for(const t of TRIPS) if(!t.up){ add(t.from.cc, t.date, t.from.name, false, false); add(t.to.cc, t.date, t.to.name, true, false); }
+  for(const t of TRIPS) if(!t.up){
+    add(t.from.cc, t.date, t.from.name, false, false); add(t.to.cc, t.date, t.to.name, true, false);
+    for(const [cc] of tripCrossings(t)) add(cc, t.date, null, false, false);   // проезжали через страну
+  }
   const today = todayStr();
   for(const j of journeys){
     if(j.start > today || (yearFilter!=='all' && j.start.slice(0,4)!==yearFilter)) continue;
@@ -1148,7 +1151,7 @@ function renderCountries(){
   const ptsBy = {};
   const addPt = (cc,lon,lat)=>{ if(cc) (ptsBy[cc] ||= []).push([lon,lat]); };
   for(const a of ARCS) if(!a.up){ addPt(a.a.country,a.a.lon,a.a.lat); addPt(a.b.country,a.b.lon,a.b.lat); }
-  for(const t of TRIPS) if(!t.up){ addPt(t.from.cc,t.from.lon,t.from.lat); addPt(t.to.cc,t.to.lon,t.to.lat); }
+  for(const t of TRIPS) if(!t.up){ addPt(t.from.cc,t.from.lon,t.from.lat); addPt(t.to.cc,t.to.lon,t.to.lat); for(const [cc,lo,la] of tripCrossings(t)) addPt(cc,lo,la); }
   for(const c of COUNTRIES) if(!ptsBy[c.cc]) ptsBy[c.cc] = [];   // страны только из путешествий — закрашиваем материк
   VISITED_PTS = ptsBy;
   [VISITED_FC, FLAGS_FC] = Object.keys(COUNTRY_PARTS).length ? buildVisitedGeo(ptsBy) : [EMPTY_FC, EMPTY_FC];
@@ -1241,8 +1244,9 @@ function buildJ(){
   const pts = Object.entries(used).map(([k,n])=>({...BY_IATA[k], n}));
   // страны путешествия + точки внутри них (чтобы закрасить и острова, где были)
   const ptsBy = {}; for(const cc of j.countries) ptsBy[cc] = [];
-  for(const a of arcs) for(const x of [a.a,a.b]) if(ptsBy[x.country]) ptsBy[x.country].push([x.lon,x.lat]);
-  for(const t of tr) for(const x of [t.from,t.to]) if(ptsBy[x.cc]) ptsBy[x.cc].push([x.lon,x.lat]);
+  const addP = (cc,lon,lat)=>{ if(cc) (ptsBy[cc] ||= []).push([lon,lat]); };
+  for(const a of arcs) for(const x of [a.a,a.b]) addP(x.country, x.lon, x.lat);
+  for(const t of tr){ for(const x of [t.from,t.to]) addP(x.cc, x.lon, x.lat); for(const [cc,lo,la] of tripCrossings(t)) addP(cc, lo, la); }
   const [fc, flags] = Object.keys(COUNTRY_PARTS).length ? buildVisitedGeo(ptsBy) : [EMPTY_FC, EMPTY_FC];
   J = { j, arcs, trips: tr, pts, fc, flags };
 }
@@ -1357,6 +1361,32 @@ document.getElementById('jForm').addEventListener('submit', e=>{
   selectJourney(j.id);
 });
 
+// страна по координате и страны вдоль линии маршрута (для наземных поездок)
+function countryAt(lon, lat){
+  for(const [cc, parts] of Object.entries(COUNTRY_PARTS)) for(const p of parts) if(partHas(p, lon, lat)) return cc;
+  return null;
+}
+const crossCache = new Map();
+function tripCrossings(t){
+  if(!Object.keys(COUNTRY_PARTS).length) return [];
+  const line = t.line || greatCircle(t.from, t.to, 24);
+  const key = t.id + ':' + line.length;
+  if(crossCache.has(key)) return crossCache.get(key);
+  // уплотняем линию (шаг ~0.2°), чтобы не проскочить маленькую страну
+  const pts = [];
+  for(let i=0;i<line.length;i++){
+    pts.push(line[i]);
+    if(i+1<line.length){
+      const [x1,y1]=line[i], [x2,y2]=line[i+1], n=Math.min(40, Math.ceil(Math.hypot(x2-x1,y2-y1)/0.2));
+      for(let k=1;k<n;k++) pts.push([x1+(x2-x1)*k/n, y1+(y2-y1)*k/n]);
+    }
+  }
+  const out = new Map();
+  for(const [lon,lat] of pts){ const cc = countryAt(lon,lat); if(cc && !out.has(cc)) out.set(cc, [cc, lon, lat]); }
+  const res = [...out.values()];
+  crossCache.set(key, res);
+  return res;
+}
 function unwrapRing(ring){
   let prev = null;
   return ring.map(([lon,lat])=>{
@@ -1469,6 +1499,7 @@ function renderChrome(){
   document.getElementById('title').innerHTML = PAGE_TITLES[page];
   document.querySelectorAll('#tabs [data-page]').forEach(b=>b.classList.toggle('on', +b.dataset.page===page));
   panel.classList.toggle('page-countries', page===2);
+  document.getElementById('shareBtn').hidden = page===1;
   const st = page===0 ? FSTATS : page===1 ? TSTATS : CSTATS;
   st.forEach(([v,l],i)=>{ document.getElementById('sv'+i).textContent = v; document.getElementById('sl'+i).textContent = l; });
   document.getElementById('clearBtn').disabled = false;
@@ -2224,12 +2255,10 @@ function selection(){
   // точки посещений по странам
   const pts = {}, last = {};
   const add = (cc,lon,lat,date)=>{ if(!cc) return; (pts[cc] ||= []); if(lon!=null) pts[cc].push([lon,lat]); if(date && (!last[cc] || date>last[cc])) last[cc]=date; };
-  const isJourney = period.startsWith('j:');
-  for(const f of F){ const a=BY[f.from], b=BY[f.to]; if(!isJourney) add(a.country,a.lon,a.lat,f.date); add(b.country,b.lon,b.lat,f.date); }
-  for(const t of T){ if(!isJourney) add(t.from.cc,t.from.lon,t.from.lat,t.date); add(t.to.cc,t.to.lon,t.to.lat,t.date); }
-  if(isJourney){   // для путешествия — только его страны
-    const keep = new Set(J[0]?.countries || []);
-    for(const k of Object.keys(pts)) if(!keep.has(k)) delete pts[k];
+  for(const f of F){ const a=BY[f.from], b=BY[f.to]; add(a.country,a.lon,a.lat,f.date); add(b.country,b.lon,b.lat,f.date); }
+  for(const t of T){
+    add(t.from.cc,t.from.lon,t.from.lat,t.date); add(t.to.cc,t.to.lon,t.to.lat,t.date);
+    for(const [cc,lo,la] of tripCrossings(t)) add(cc,lo,la,t.date);   // страны по пути
   }
   for(const j of J) for(const cc of j.countries) add(cc,null,null,j.end);
   const km = F.reduce((s,f)=>s+dist(BY[f.from],BY[f.to]),0) + T.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
@@ -2316,7 +2345,13 @@ function draw(){
   // карта: весь мир, а для путешествия или пары стран — приближение к ним
   const vparts = visitedParts(S.pts);
   const zoom = vparts.length && (period.startsWith('j:') || visited.length <= 3);
-  V = zoom ? zoomView(vparts.filter(p=>Math.abs(p.bbox[2]-p.bbox[0])<200)) : worldView();
+  const isJ = period.startsWith('j:');
+  const routes = isJ ? [
+    ...S.F.map(f=>({mode:'fly', line:greatCircle(BY[f.from], BY[f.to])})),
+    ...S.T.map(t=>({mode:t.mode, line:t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]]}))
+  ] : [];
+  const extraParts = routes.length ? [{ rings:[routes.flatMap(r=>r.line)], bbox:[0,0,0,0] }] : [];
+  V = zoom ? zoomView([...vparts.filter(p=>Math.abs(p.bbox[2]-p.bbox[0])<200), ...extraParts]) : worldView();
   ctx.save();
   if(V.world) ctx.clip(outline());
   else { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(MAP.x+20,MAP.y,MAP.w-40,MAP.h,24) : ctx.rect(MAP.x+20,MAP.y,MAP.w-40,MAP.h); ctx.clip(); }
@@ -2326,7 +2361,35 @@ function draw(){
   ctx.fillStyle=T_.fill; ctx.fill(vis);
   // тонкие границы поверх, чтобы соседние страны читались
   ctx.strokeStyle=T_.border; ctx.lineWidth=V.world ? 1.1 : 2; ctx.stroke(land);
+
+  // маршруты путешествия: цвет и значок по виду транспорта
+  const RC = { fly:'#2563eb', train:'#7c3aed', bus:'#ea580c', car:'#dc2626', ferry:'#0891b2' };
+  const RI = { fly:'✈', train:'🚆', bus:'🚌', car:'🚗', ferry:'⛴' };
+  const stops = new Map(), badges = [];
+  for(const r of routes){
+    const px = r.line.map(([lo,la])=>proj(lo,la));
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=9; ctx.setLineDash([]);
+    ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+    ctx.strokeStyle=RC[r.mode]||RC.train; ctx.lineWidth=5;
+    ctx.setLineDash(r.mode==='fly' ? [14,10] : r.mode==='ferry' ? [10,8] : []);
+    ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+    ctx.setLineDash([]);
+    for(const q of [px[0], px[px.length-1]]) stops.set(q[0].toFixed(0)+','+q[1].toFixed(0), q);
+    let L=0; const sg=[]; for(let i=1;i<px.length;i++){ const d=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]); sg.push(d); L+=d; }
+    let tgt=L/2, m=px[0];
+    for(let i=0;i<sg.length;i++){ if(tgt<=sg[i]){ const k=sg[i]?tgt/sg[i]:0; m=[px[i][0]+(px[i+1][0]-px[i][0])*k, px[i][1]+(px[i+1][1]-px[i][1])*k]; break; } tgt-=sg[i]; }
+    if(L > 70 && !badges.some(b=>Math.hypot(b[0]-m[0], b[1]-m[1]) < 44)) badges.push([m[0], m[1], r.mode]);
+  }
+  for(const [x,y] of stops.values()){ ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=T_.text; ctx.stroke(); }
+  for(const [x,y,mode] of badges){
+    ctx.beginPath(); ctx.arc(x,y,19,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=RC[mode]||RC.train; ctx.stroke();
+    ctx.font='20px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle=RC[mode]; ctx.fillText(RI[mode]||'', x, y+1);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   ctx.restore();
+  const usedModes = [...new Set(routes.map(r=>r.mode))];
 
   // флаги посещённых стран — от последней к первой
   const flagsOrder = [...visited].sort((a,b)=>(S.last[b]||'').localeCompare(S.last[a]||''));
@@ -2346,6 +2409,22 @@ function draw(){
     ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.strokeStyle=T_.bg; ctx.lineWidth=4; ctx.stroke();
   });
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+
+  // легенда: какой линией что показано
+  if(usedModes.length){
+    const LN = { fly:'Самолёт', train:'Поезд', bus:'Автобус', car:'Машина', ferry:'Паром' };
+    const ly = fy0 + Math.max(1,rows)*72 - 8;
+    ctx.font='600 24px Inter, sans-serif';
+    const widths = usedModes.map(m=> 64 + ctx.measureText(LN[m]).width + 34);
+    let lx = W/2 - widths.reduce((a,b)=>a+b,0)/2 + 17;
+    usedModes.forEach((m,i)=>{
+      ctx.strokeStyle=RC[m]; ctx.lineWidth=5; ctx.lineCap='round'; ctx.setLineDash(m==='fly' ? [10,7] : m==='ferry' ? [8,6] : []);
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+46, ly); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=T_.text; ctx.textBaseline='middle'; ctx.fillText(LN[m], lx+58, ly+1);
+      lx += widths[i];
+    });
+    ctx.textBaseline='alphabetic';
+  }
 
   // статистика в линию
   const pct = Math.round(visited.length/195*100);
