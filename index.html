@@ -2346,182 +2346,49 @@ function draw(){
   const vparts = visitedParts(S.pts);
   const zoom = vparts.length && (period.startsWith('j:') || visited.length <= 3);
   const isJ = period.startsWith('j:');
+  const routes = isJ ? [
+    ...S.F.map(f=>({mode:'fly', line:greatCircle(BY[f.from], BY[f.to])})),
+    ...S.T.map(t=>({mode:t.mode, line:t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]]}))
+  ] : [];
+  const extraParts = routes.length ? [{ rings:[routes.flatMap(r=>r.line)], bbox:[0,0,0,0] }] : [];
+  V = zoom ? zoomView([...vparts.filter(p=>Math.abs(p.bbox[2]-p.bbox[0])<200), ...extraParts]) : worldView();
+  ctx.save();
+  if(V.world) ctx.clip(outline());
+  else { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(MAP.x+20,MAP.y,MAP.w-40,MAP.h,24) : ctx.rect(MAP.x+20,MAP.y,MAP.w-40,MAP.h); ctx.clip(); }
+  const land = new Path2D(); for(const poly of LANDPOLYS) addRings(land, poly);
+  ctx.fillStyle=T_.land; ctx.fill(land);
+  const vis = new Path2D(); for(const p of vparts) addRings(vis, p.rings);
+  ctx.fillStyle=T_.fill; ctx.fill(vis);
+  // тонкие границы поверх, чтобы соседние страны читались
+  ctx.strokeStyle=T_.border; ctx.lineWidth=V.world ? 1.1 : 2; ctx.stroke(land);
+
+  // маршруты путешествия: цвет и значок по виду транспорта
   const RC = { fly:'#2563eb', train:'#7c3aed', bus:'#ea580c', car:'#dc2626', ferry:'#0891b2' };
   const RI = { fly:'✈', train:'🚆', bus:'🚌', car:'🚗', ferry:'⛴' };
-  const pt = (lon,lat,name,cc)=>({lon,lat,name,cc});
-  const routes = isJ ? [
-    ...S.F.map(f=>{ const A=BY[f.from], B=BY[f.to]; return {mode:'fly', line:greatCircle(A,B), km:dist(A,B),
-        a:pt(A.lon,A.lat,A.city||A.iata,A.country), b:pt(B.lon,B.lat,B.city||B.iata,B.country)}; }),
-    ...S.T.map(t=>({mode:t.mode, line:t.line || [[t.from.lon,t.from.lat],[t.to.lon,t.to.lat]], km:+t.km||dist(t.from,t.to),
-        a:pt(t.from.lon,t.from.lat,t.from.name,t.from.cc), b:pt(t.to.lon,t.to.lat,t.to.name,t.to.cc)}))
-  ] : [];
-  const AREA = { x:40, y:MAP.y, w:MAP.w-40, h:MAP.h };
-  const projV = (v,lon,lat)=>{ const [x,y]=ee(lon,lat); return [v.ox + x*v.k, v.oy - y*v.k]; };
-  function fitView(rect, pts, minDeg, pad=1.4){
-    let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity;
-    for(const [lon,lat] of pts){ const [x,y]=ee(Math.max(-180,Math.min(180,lon)),lat); a=Math.min(a,x); c=Math.max(c,x); b=Math.min(b,y); d=Math.max(d,y); }
-    const ms = minDeg*RAD;
-    const cx=(a+c)/2, cy=(b+d)/2, bw=Math.max(c-a,ms)*pad, bh=Math.max(d-b,ms)*pad;
-    const k = Math.min(rect.w/bw, rect.h/bh);
-    return { k, ox: rect.x+rect.w/2 - cx*k, oy: rect.y+rect.h/2 + cy*k, world:false };
+  const stops = new Map(), badges = [];
+  for(const r of routes){
+    const px = r.line.map(([lo,la])=>proj(lo,la));
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=9; ctx.setLineDash([]);
+    ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+    ctx.strokeStyle=RC[r.mode]||RC.train; ctx.lineWidth=5;
+    ctx.setLineDash(r.mode==='fly' ? [14,10] : r.mode==='ferry' ? [10,8] : []);
+    ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
+    ctx.setLineDash([]);
+    for(const q of [px[0], px[px.length-1]]) stops.set(q[0].toFixed(0)+','+q[1].toFixed(0), q);
+    let L=0; const sg=[]; for(let i=1;i<px.length;i++){ const d=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]); sg.push(d); L+=d; }
+    let tgt=L/2, m=px[0];
+    for(let i=0;i<sg.length;i++){ if(tgt<=sg[i]){ const k=sg[i]?tgt/sg[i]:0; m=[px[i][0]+(px[i+1][0]-px[i][0])*k, px[i][1]+(px[i+1][1]-px[i][1])*k]; break; } tgt-=sg[i]; }
+    if(L > 70 && !badges.some(b=>Math.hypot(b[0]-m[0], b[1]-m[1]) < 44)) badges.push([m[0], m[1], r.mode]);
   }
-
-  // ---- «разрезанная» карта: остановки делим на группы, далёкие группы — в отдельные окна ----
-  function clusterStops(){
-    const nodes = [], idx = new Map();
-    const node = p=>{ const k=p.lat.toFixed(2)+','+p.lon.toFixed(2); if(!idx.has(k)){ idx.set(k,nodes.length); nodes.push(p); } return idx.get(k); };
-    const par = [];
-    const find = x=>{ while(par[x]!==x) x=par[x]=par[par[x]]; return x; };
-    const uni = (x,y)=>{ par[find(x)]=find(y); };
-    for(const r of routes){ r.ia=node(r.a); r.ib=node(r.b); }
-    nodes.forEach((_,i)=>par[i]=i);
-    for(const r of routes) if(r.mode!=='fly') uni(r.ia, r.ib);
-    for(let i=0;i<nodes.length;i++) for(let k=i+1;k<nodes.length;k++) if(dist(nodes[i],nodes[k]) < 250) uni(i,k);
-    const groups = new Map();
-    nodes.forEach((n,i)=>{ const g=find(i); if(!groups.has(g)) groups.set(g,[]); groups.get(g).push(i); });
-    const cl = [...groups.values()].map(ids=>({ ids:new Set(ids), nodes:ids.map(i=>nodes[i]) }));
-    nodes.forEach((n,i)=>{ n.cl = cl.findIndex(c=>c.ids.has(i)); });
-    return { nodes, cl };
-  }
-  let panels = null, CL = null;
-  if(isJ && routes.some(r=>r.mode==='fly')){
-    CL = clusterStops();
-    const cl = CL.cl;
-    if(cl.length>=2 && cl.length<=3){
-      const span = c=>{ let m=150; for(const p of c.nodes) for(const q of c.nodes) m=Math.max(m,dist(p,q)); return m; };
-      const cen = c=>({ lon:c.nodes.reduce((s,p)=>s+p.lon,0)/c.nodes.length, lat:c.nodes.reduce((s,p)=>s+p.lat,0)/c.nodes.length });
-      cl.forEach(c=>{ c.span=span(c); c.c=cen(c); });
-      let gap = Infinity; for(let x=0;x<cl.length;x++) for(let y=x+1;y<cl.length;y++) gap=Math.min(gap, dist(cl[x].c, cl[y].c));
-      if(gap > 2.5*Math.max(...cl.map(c=>c.span))){
-        const lonS = Math.max(...cl.map(c=>c.c.lon))-Math.min(...cl.map(c=>c.c.lon));
-        const latS = Math.max(...cl.map(c=>c.c.lat))-Math.min(...cl.map(c=>c.c.lat));
-        const horiz = true;   // окна всегда рядом — так они почти квадратные
-        const order = [...cl.keys()].sort((x,y)=> horiz ? cl[x].c.lon-cl[y].c.lon : cl[y].c.lat-cl[x].c.lat);
-        const G = 64, n = cl.length;
-        panels = order.map((ci,k)=>{
-          const rect = horiz
-            ? { x:AREA.x + k*((AREA.w-G*(n-1))/n + G), y:AREA.y, w:(AREA.w-G*(n-1))/n, h:AREA.h }
-            : { x:AREA.x, y:AREA.y + k*((AREA.h-G*(n-1))/n + G), w:AREA.w, h:(AREA.h-G*(n-1))/n };
-          // окно вписываем по остановкам и наземным линиям группы
-          const pts = cl[ci].nodes.map(p=>[p.lon,p.lat]);
-          let ground = false;
-          for(const r of routes) if(r.mode!=='fly' && CL.nodes[r.ia].cl===ci){ pts.push(...r.line); ground = true; }
-          // без наземных поездок (только аэропорт) — показываем больше местности вокруг
-          return { ci, rect, view: ground ? fitView(rect, pts, 1.5, 1.6) : fitView(rect, pts, 9) };
-        });
-      }
-    }
-  }
-
-  // ---- рисование одного окна карты ----
-  function drawArea(rect, view, rlist, labels, extraStops=[]){
-    V = view;
-    ctx.save();
-    if(view.world) ctx.clip(outline());
-    else { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(rect.x,rect.y,rect.w,rect.h,24) : ctx.rect(rect.x,rect.y,rect.w,rect.h); ctx.clip(); }
-    const land = new Path2D(); for(const poly of LANDPOLYS) addRings(land, poly);
-    ctx.fillStyle=T_.land; ctx.fill(land);
-    const vis = new Path2D(); for(const p of vparts) addRings(vis, p.rings);
-    ctx.fillStyle=T_.fill; ctx.fill(vis);
-    ctx.strokeStyle=T_.border; ctx.lineWidth=view.world ? 1.1 : 2; ctx.stroke(land);
-    const stops = new Map(), badges = [];
-    for(const r of rlist){
-      const px = r.line.map(([lo,la])=>proj(lo,la));
-      ctx.lineCap='round'; ctx.lineJoin='round';
-      ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=9; ctx.setLineDash([]);
-      ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
-      ctx.strokeStyle=RC[r.mode]||RC.train; ctx.lineWidth=5;
-      ctx.setLineDash(r.mode==='fly' ? [14,10] : r.mode==='ferry' ? [10,8] : []);
-      ctx.beginPath(); px.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke();
-      ctx.setLineDash([]);
-      for(const [q,p] of [[px[0],r.a],[px[px.length-1],r.b]]) stops.set(q[0].toFixed(0)+','+q[1].toFixed(0), {q,p});
-      let L=0; const sg=[]; for(let i=1;i<px.length;i++){ const d=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]); sg.push(d); L+=d; }
-      let tgt=L/2, m=px[0];
-      for(let i=0;i<sg.length;i++){ if(tgt<=sg[i]){ const k=sg[i]?tgt/sg[i]:0; m=[px[i][0]+(px[i+1][0]-px[i][0])*k, px[i][1]+(px[i+1][1]-px[i][1])*k]; break; } tgt-=sg[i]; }
-      if(L > 60 && !badges.some(b=>Math.hypot(b[0]-m[0], b[1]-m[1]) < 44)) badges.push([m[0], m[1], r.mode]);
-    }
-    for(const p of extraStops){ const q=proj(p.lon,p.lat); stops.set(q[0].toFixed(0)+','+q[1].toFixed(0), {q,p}); }
-    for(const {q:[x,y]} of stops.values()){ ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=T_.text; ctx.stroke(); }
-    for(const [x,y,mode] of badges) badge(x,y,mode);
-    // подписи остановок (в увеличенных окнах)
-    if(labels){
-      const boxes = badges.map(([x,y])=>[x-22,y-22,x+22,y+22]);
-      ctx.font='600 21px Inter, sans-serif'; ctx.textBaseline='alphabetic';
-      const seenL = new Set();
-      for(const {q:[x,y],p} of stops.values()){
-        const name = String(p.name).split(',')[0].replace(/\s+(Hbf|Hauptbahnhof|Centralna|Główny|Glowny|Centrale|Gare|Station)$/i,'');
-        if(seenL.has(name) || [...seenL].some(v=>Array.isArray(v) && Math.hypot(v[0]-x,v[1]-y)<30)) continue;   // одно место — одна подпись
-        seenL.add(name); seenL.add([x,y]);
-        const tw = ctx.measureText(name).width;
-        for(const [dx,dy,al] of [[0,-14,'center'],[0,32,'center'],[12,7,'left'],[-12,7,'right']]){
-          const lx=x+dx, ly=y+dy, left = al==='center'?lx-tw/2:al==='left'?lx:lx-tw;
-          const box=[left-4,ly-20,left+tw+4,ly+6];
-          if(left<rect.x+6 || left+tw>rect.x+rect.w-6 || ly-24<rect.y+4 || ly>rect.y+rect.h-6) continue;
-          if(boxes.some(o=>box[0]<o[2]&&box[2]>o[0]&&box[1]<o[3]&&box[3]>o[1])) continue;
-          ctx.textAlign=al; ctx.lineWidth=5; ctx.strokeStyle=T_.bg; ctx.strokeText(name,lx,ly);
-          ctx.fillStyle=T_.text; ctx.fillText(name,lx,ly); boxes.push(box); break;
-        }
-      }
-    }
-    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-    ctx.restore();
-  }
-  function badge(x,y,mode){
+  for(const [x,y] of stops.values()){ ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=T_.text; ctx.stroke(); }
+  for(const [x,y,mode] of badges){
     ctx.beginPath(); ctx.arc(x,y,19,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=RC[mode]||RC.train; ctx.stroke();
     ctx.font='20px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillStyle=RC[mode]; ctx.fillText(RI[mode]||'', x, y+1);
-    ctx.textAlign='left'; ctx.textBaseline='alphabetic';
   }
-
-  if(panels){
-    // каждое окно — своя группа остановок в крупном масштабе
-    for(const P_ of panels){
-      const inside = routes.filter(r=> CL.nodes[r.ia].cl===P_.ci && CL.nodes[r.ib].cl===P_.ci);
-      // концы перелётов в другие окна — тоже точки с подписью
-      const ends = [];
-      for(const r of routes) if(r.mode==='fly' && CL.nodes[r.ia].cl!==CL.nodes[r.ib].cl){
-        if(CL.nodes[r.ia].cl===P_.ci) ends.push(r.a);
-        if(CL.nodes[r.ib].cl===P_.ci) ends.push(r.b);
-      }
-      drawArea(P_.rect, P_.view, inside, true, ends);
-      // флаги стран группы в углу окна
-      const ccs = [...new Set(CL.cl[P_.ci].nodes.map(n=>n.cc).filter(Boolean))].slice(0,4);
-      ctx.font='26px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textBaseline='top';
-      ctx.fillText(ccs.map(cc=>String.fromCodePoint(...[...cc].map(c=>0x1F1E6+c.charCodeAt(0)-65))).join(' '), P_.rect.x+14, P_.rect.y+12);
-      ctx.textBaseline='alphabetic';
-    }
-    // перелёты между окнами — дугой поверх разрыва
-    const pIdx = new Map(panels.map(P_=>[P_.ci,P_]));
-    const done = new Map(), flyBadges = [];
-    for(const r of routes){
-      if(r.mode!=='fly') continue;
-      const ca = CL.nodes[r.ia].cl, cb = CL.nodes[r.ib].cl; if(ca===cb) continue;
-      const A = projV(pIdx.get(ca).view, r.a.lon, r.a.lat), B = projV(pIdx.get(cb).view, r.b.lon, r.b.lat);
-      const key = [ca,cb].sort().join('-'), nth = done.get(key) || 0; done.set(key, nth+1);
-      const dx=B[0]-A[0], dy=B[1]-A[1], d=Math.hypot(dx,dy)||1;
-      let nx=-dy/d, ny=dx/d; if(ny>0){ nx=-nx; ny=-ny; }
-      const bend = (70 + nth*45) * (nth%2 ? -1 : 1);
-      const cx=(A[0]+B[0])/2+nx*bend, cy=(A[1]+B[1])/2+ny*bend;
-      ctx.lineCap='round';
-      ctx.strokeStyle='rgba(255,255,255,0.9)'; ctx.lineWidth=9; ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.quadraticCurveTo(cx,cy,B[0],B[1]); ctx.stroke();
-      ctx.strokeStyle=RC.fly; ctx.lineWidth=5; ctx.setLineDash([14,10]);
-      ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.quadraticCurveTo(cx,cy,B[0],B[1]); ctx.stroke(); ctx.setLineDash([]);
-      for(const [x,y] of [A,B]){ ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.lineWidth=3; ctx.strokeStyle=T_.text; ctx.stroke(); }
-      const mx=(A[0]+2*cx+B[0])/4, my=(A[1]+2*cy+B[1])/4;
-      if(!flyBadges.some(b=>Math.hypot(b[0]-mx,b[1]-my)<50)){
-        flyBadges.push([mx,my]); badge(mx,my,'fly');
-        const lbl = Math.round(r.km).toLocaleString('ru-RU')+' km';
-        ctx.font='600 19px Inter, sans-serif'; ctx.textAlign='center';
-        ctx.lineWidth=5; ctx.strokeStyle=T_.bg; ctx.strokeText(lbl, mx, my+42);
-        ctx.fillStyle=RC.fly; ctx.fillText(lbl, mx, my+42); ctx.textAlign='left';
-      }
-    }
-  } else {
-    const extraParts = routes.length ? [{ rings:[routes.flatMap(r=>r.line)], bbox:[0,0,0,0] }] : [];
-    const view = zoom ? zoomView([...vparts.filter(p=>Math.abs(p.bbox[2]-p.bbox[0])<200), ...extraParts]) : worldView();
-    drawArea(view.world ? MAP : AREA, view, routes, isJ && !view.world);
-  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.restore();
   const usedModes = [...new Set(routes.map(r=>r.mode))];
 
   // флаги посещённых стран — от последней к первой
