@@ -1738,6 +1738,45 @@ function plane(x,y,s,color,rot=0){
   ctx.lineTo(-7,10); ctx.lineTo(-4,10); ctx.lineTo(1,2); ctx.lineTo(9,2); ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function label(t,x,y,align='left'){ ctx.textAlign=align; ctx.fillStyle=INK2; ctx.font='600 22px Inter, sans-serif'; ctx.fillText(t.toUpperCase().split('').join(' '),x,y); ctx.textAlign='left'; }
+function drawBody(kind, x, y, r){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.clip();
+  if(kind==='earth'){
+    let g=ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r); g.addColorStop(0,'#5fb3ff'); g.addColorStop(1,'#1d5fbf');
+    ctx.fillStyle=g; ctx.fillRect(x-r,y-r,2*r,2*r);
+    ctx.fillStyle='#3fa34d';
+    const blob=(pts)=>{ ctx.beginPath(); pts.forEach(([a,b],i)=>{ const px=x+a*r, py=y+b*r; i?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); ctx.fill(); };
+    blob([[-0.7,-0.5],[-0.3,-0.75],[0.05,-0.55],[-0.05,-0.2],[-0.35,-0.05],[-0.45,0.35],[-0.7,0.1]]);
+    blob([[0.2,-0.1],[0.6,-0.35],[0.85,0.0],[0.7,0.45],[0.35,0.6],[0.25,0.25]]);
+    blob([[-0.25,0.55],[0.05,0.5],[0.1,0.85],[-0.2,0.9]]);
+    ctx.fillStyle='rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.ellipse(x-r*0.1,y-r*0.92,r*0.55,r*0.14,0,0,7); ctx.fill();
+  } else if(kind==='moon'){
+    let g=ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r); g.addColorStop(0,'#eceef2'); g.addColorStop(1,'#9aa1ad');
+    ctx.fillStyle=g; ctx.fillRect(x-r,y-r,2*r,2*r);
+    ctx.fillStyle='rgba(90,98,112,0.35)';
+    for(const [a,b,c] of [[-0.35,-0.3,0.22],[0.3,-0.45,0.13],[0.35,0.2,0.26],[-0.3,0.45,0.15],[0.05,0.0,0.09],[-0.65,0.1,0.1]]){ ctx.beginPath(); ctx.arc(x+a*r,y+b*r,c*r,0,7); ctx.fill(); }
+  } else if(kind==='venus'){
+    let g=ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r); g.addColorStop(0,'#fbe7b0'); g.addColorStop(1,'#c99a4b');
+    ctx.fillStyle=g; ctx.fillRect(x-r,y-r,2*r,2*r);
+    ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=r*0.12;
+    for(const b of [-0.45,-0.1,0.25,0.55]){ ctx.beginPath(); ctx.ellipse(x,y+b*r,r*1.1,r*0.18,-0.15,0,Math.PI); ctx.stroke(); }
+  } else if(kind==='jupiter'){
+    let g=ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r); g.addColorStop(0,'#f3dcb8'); g.addColorStop(1,'#b98a5c');
+    ctx.fillStyle=g; ctx.fillRect(x-r,y-r,2*r,2*r);
+    for(const [b,h,c] of [[-0.55,0.14,'rgba(150,95,55,0.55)'],[-0.2,0.16,'rgba(170,110,65,0.6)'],[0.15,0.12,'rgba(150,95,55,0.5)'],[0.5,0.15,'rgba(170,110,65,0.55)']]){ ctx.fillStyle=c; ctx.fillRect(x-r, y+b*r, 2*r, h*r); }
+    ctx.fillStyle='rgba(190,80,50,0.8)'; ctx.beginPath(); ctx.ellipse(x+r*0.3,y+r*0.32,r*0.2,r*0.11,0,0,7); ctx.fill();
+  } else {
+    let g=ctx.createRadialGradient(x-r*0.35,y-r*0.35,r*0.1,x,y,r); g.addColorStop(0,'#f2884f'); g.addColorStop(1,'#a8401c');
+    ctx.fillStyle=g; ctx.fillRect(x-r,y-r,2*r,2*r);
+    ctx.fillStyle='rgba(110,35,12,0.35)';
+    for(const [a,b,c,d] of [[-0.2,-0.2,0.45,0.16],[0.3,0.3,0.35,0.12],[-0.4,0.45,0.25,0.1]]){ ctx.beginPath(); ctx.ellipse(x+a*r,y+b*r,c*r,d*r,-0.3,0,7); ctx.fill(); }
+    ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(x,y-r*0.93,r*0.4,r*0.12,0,0,7); ctx.fill();
+  }
+  // тень с ночной стороны
+  const sh=ctx.createRadialGradient(x-r*0.5,y-r*0.5,r*0.6,x-r*0.2,y-r*0.2,r*1.5); sh.addColorStop(0,'rgba(0,0,0,0)'); sh.addColorStop(1,'rgba(0,0,0,0.35)');
+  ctx.fillStyle=sh; ctx.fillRect(x-r,y-r,2*r,2*r);
+  ctx.restore();
+}
 function value(t,x,y,size=46,align='left',color=INK){ ctx.textAlign=align; ctx.fillStyle=color; ctx.font=`800 ${size}px Inter, sans-serif`; ctx.fillText(t,x,y); ctx.textAlign='left'; }
 function hash(s){ let h=2166136261; for(const c of s){ h^=c.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
 function rng(seed){ return ()=>{ seed^=seed<<13; seed^=seed>>>17; seed^=seed<<5; return (seed>>>0)/4294967296; }; }
@@ -1769,19 +1808,39 @@ function draw(){
   ctx.fillStyle='#fff'; ctx.font='800 40px Inter, sans-serif'; ctx.fillText(period==='all'?'ALL TIME':period, W-60, 106);
   ctx.textAlign='left';
 
-  // два самых популярных аэропорта
-  const [[ra, na], [rb, nb]] = S.top2, A = BY_IATA[ra], B = BY_IATA[rb];
-  label(`#1 · ${na}×`, 60, 222); label(`#2 · ${nb}×`, W-60, 222, 'right');
-  value(ra, 56, 340, 128); value(rb || '---', W-56, 340, 128, 'right');
+  // слева — самый популярный аэропорт, справа — сколько уже «пролетели» до следующей цели
+  const [[ra, na]] = S.top2, A = BY_IATA[ra];
+  const KM = S.km, EQ = 40075, MOON = 384400;
+  const GOALS = [
+    { km:EQ,       body:'earth', label:'AROUND THE EARTH', sub: k=>`${fmtN(EQ-k)} km to go` },
+    { km:MOON,     body:'moon',  label:'TO THE MOON',      sub: k=>`${(k/EQ).toFixed(1)}× around the Earth` },
+    // дальше — планеты по минимальному расстоянию от Земли
+    { km:38200000,  body:'venus',   label:'TO VENUS',   sub: k=>`${(k/MOON).toFixed(1)}× to the Moon` },
+    { km:54600000,  body:'mars',    label:'TO MARS',    sub: k=>`${(k/MOON).toFixed(1)}× to the Moon` },
+    { km:588000000, body:'jupiter', label:'TO JUPITER', sub: k=>`${(k/MOON).toFixed(0)}× to the Moon` },
+  ];
+  const goal = GOALS.find(g=>KM < g.km) || GOALS[GOALS.length-1];
+  const pct = KM/goal.km*100;
+  const pctStr = (pct >= 10 ? Math.floor(pct) : pct >= 1 ? pct.toFixed(1) : pct.toFixed(2)).toString().replace('.', ',') + '%';
+  label(`#1 · ${na}×`, 60, 222); label(goal.label, W-60, 222, 'right');
+  value(ra, 56, 340, 128);
+  // значок цели (Земля / Луна / Марс) с кольцом прогресса и процентом рядом
+  const IX = W-118, IY = 302, IR = 42;
+  drawBody(goal.body, IX, IY, IR);
+  ctx.save(); ctx.lineCap='round';
+  ctx.strokeStyle='rgba(22,33,62,0.12)'; ctx.lineWidth=8; ctx.beginPath(); ctx.arc(IX,IY,IR+13,0,7); ctx.stroke();
+  ctx.strokeStyle=ORANGE; ctx.beginPath(); ctx.arc(IX,IY,IR+13,-Math.PI/2,-Math.PI/2+Math.max(0.02,Math.min(1,pct/100))*Math.PI*2); ctx.stroke();
+  ctx.restore();
+  value(pctStr, IX-IR-30, IY+22, 64, "right", ORANGE);
   ctx.fillStyle=INK2; ctx.font='500 28px Inter, sans-serif';
   ctx.fillText(A ? A.city : '', 60, 388);
-  ctx.textAlign='right'; ctx.fillText(B ? B.city : '', W-60, 388); ctx.textAlign='left';
-  // пунктирная дуга с самолётом
+  ctx.textAlign='right'; ctx.fillText(goal.sub(KM), W-60, 388); ctx.textAlign='left';
+  // пунктирная дуга с самолётом и общим расстоянием
   ctx.save(); ctx.setLineDash([3,10]); ctx.lineCap='round'; ctx.strokeStyle=INK2; ctx.lineWidth=4;
   ctx.beginPath(); ctx.moveTo(445,300); ctx.quadraticCurveTo(540,220,635,300); ctx.stroke(); ctx.restore();
   plane(540, 256, 46, ORANGE, 0);
   ctx.textAlign='center'; ctx.fillStyle=ORANGE; ctx.font='700 22px Inter, sans-serif';
-  ctx.fillText('TOP AIRPORTS', 540, 340); ctx.textAlign='left';
+  ctx.fillText(`${fmtN(KM)} KM`, 540, 340); ctx.textAlign='left';
 
   // разделитель
   ctx.strokeStyle='rgba(22,33,62,0.15)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(60,430); ctx.lineTo(W-60,430); ctx.stroke();
