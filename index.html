@@ -1347,7 +1347,7 @@ function openProfile(){
     <div class="gfoot">С ключом при добавлении перелёта можно найти рейсы по маршруту и дате или подтянуть данные по номеру: время, самолёт, борт. Ключ хранится только в этом браузере.</div>
     <div class="ghead">Данные</div>
     <div class="grp"><button class="gi link" id="pfImp">⬇︎ Импорт из файла</button><button class="gi link" id="pfExp">⬆︎ Экспорт (сохранить копию)</button></div>
-    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки и отмеченные страны. Файл можно перенести между сайтом и приложением.</div>
+    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
     <div class="grp" style="margin-top:18px"><button class="gi danger" id="pfClr">Удалить все данные</button></div>
     <input type="file" id="pfFile" accept=".json,application/json" hidden>`;
   const q = x=>m.body.querySelector(x), key=q('#pfKey');
@@ -1373,18 +1373,32 @@ function parseImport(obj){
   const js = (obj?.journeys||[]).filter(j=>j && Array.isArray(j.countries) && j.countries.length && String(j.start||'').length===10).map(j=>({ ...j, id:num(j.id), end:j.end||j.start, title:j.title||'' }));
   const ts = (obj?.trips||[]).filter(t=>t && t.from && t.to && t.from.lat!=null && t.to.lat!=null).map(t=>({ ...t, id:num(t.id), mode:t.mode||'bus', date:t.date||'', note:t.note||'', km: +t.km || Math.round(dist(t.from,t.to)) }));
   const mn = (obj?.countries||[]).filter(x=>typeof x==='string');
-  return { flights:fl, journeys:js, trips:ts, manual:mn };
+  const apiKey = String(obj?.settings?.aerodataboxKey || '').trim();
+  return { flights:fl, journeys:js, trips:ts, manual:mn, apiKey };
+}
+function mergeFlights(cur, inc){
+  // тот же перелёт (маршрут + дата) не дублируем, а дополняем пустые поля: самолёт, борт, время…
+  const out = cur.map(f=>({...f})), ids = new Set(cur.map(f=>f.id));
+  for(const f of inc){
+    const ex = out.find(x=>x.from===f.from && x.to===f.to && x.date===f.date);
+    if(ex){ for(const k of ['airline','aircraft','reg','seat','cabin','depTime','arrTime','durMin']) if(!ex[k] && f[k]) ex[k]=f[k];
+      if(f.airline && /^[A-Z0-9]{2}\s*\d/.test(f.airline) && !/^[A-Z0-9]{2}\s*\d/.test(ex.airline||'')) ex.airline=f.airline; continue; }
+    if(!ids.has(f.id)){ out.push(f); ids.add(f.id); }
+  }
+  return out;
 }
 function applyImport(r, replace){
+  if(r.apiKey && !API.hasKey) lsSet(API.keyName, r.apiKey);   // ключ из бэкапа, если здесь его ещё нет
   if(replace){ flights=r.flights; journeys=r.journeys; trips=r.trips; manual=r.manual; selected=selJourney=selCountry=null; }
   else {
     const add = (arr, items)=>{ const ids=new Set(arr.map(x=>x.id)); return arr.concat(items.filter(x=>!ids.has(x.id))); };
-    flights=add(flights,r.flights); journeys=add(journeys,r.journeys); trips=add(trips,r.trips); manual=[...new Set([...manual,...r.manual])].sort();
+    flights=mergeFlights(flights,r.flights); journeys=add(journeys,r.journeys); trips=add(trips,r.trips); manual=[...new Set([...manual,...r.manual])].sort();
   }
   saveJ('flights.v1',flights); saveJ('journeys.v1',journeys); saveJ('trips.v1',trips); saveJ('countries.v1',manual); refresh();
 }
 function exportData(){
   const out = { version:3, flights, journeys, trips, countries:manual };
+  if(API.hasKey) out.settings = { aerodataboxKey: API.key };   // ключ — чтобы не вводить заново
   const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`flights-${todayStr()}.json`; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
