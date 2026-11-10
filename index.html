@@ -510,28 +510,13 @@ let year = lsGet('flights.year', 'all');
 let map = null, mapReady = false;
 const EMPTY_FC = {type:'FeatureCollection', features:[]};
 
-// ---------- глобус: только спутник, как в приложении ----------
-const SAT_STYLE = {
-  version:8,
-  glyphs:'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
-  sources:{
-    sat:{type:'raster',tileSize:256,maxzoom:19,
-      tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-      attribution:'Снимки © Esri, Maxar, Earthstar Geographics'},
-    places:{type:'raster',tileSize:256,maxzoom:19,
-      tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}']}
-  },
-  layers:[
-    {id:'bg',type:'background',paint:{'background-color':'#05070d'}},
-    {id:'sat',type:'raster',source:'sat'},
-    {id:'places',type:'raster',source:'places',paint:{'raster-opacity':0.85}}
-  ]
-};
-const C = { line:'#ffb347', line2:'#5ad1ff', sel:'#ffffff', up:'#c9cfdb', dot:'#ffb347', halo:'#05070d', fill:'#3ddc84' };
+// ---------- глобус: карта OpenFreeMap (Liberty), как раньше на сайте ----------
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const C = { line:'#ff5a1f', line2:'#1f7aff', sel:'#d10068', up:'#7d8696', upSel:'#4b5363', dot:'#ff5a1f', halo:'#ffffff', text:'#1b1f2a', fill:'#22c55e' };
 
 function initMap(){
   map = new maplibregl.Map({
-    container:'map', style:SAT_STYLE, center:[18,46], zoom: isMobile() ? 0.9 : 1.7,
+    container:'map', style:MAP_STYLE, center:[18,46], zoom: isMobile() ? 0.9 : 1.7,
     attributionControl:{compact:true}, renderWorldCopies:false, maxPitch:0, dragRotate:false,
   });
   map.touchZoomRotate.disableRotation();
@@ -573,7 +558,7 @@ function addLayers(){
   map.addSource('airports',{type:'geojson',data:EMPTY_FC});
   const round={'line-cap':'round','line-join':'round'};
   map.addLayer({id:'country-fill',type:'fill',source:'countries',paint:{'fill-color':C.fill,'fill-opacity':0.42}});
-  map.addLayer({id:'country-line',type:'line',source:'countries',paint:{'line-color':C.fill,'line-width':1,'line-opacity':0.8}});
+  map.addLayer({id:'country-line',type:'line',source:'countries',paint:{'line-color':'#16a34a','line-width':1,'line-opacity':0.8}});
   // градиент вдоль дуги: оранжевый у вылета → голубой у прилёта
   map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,filter:['!',['get','up']],
     paint:{'line-width':2,'line-opacity':0.85,'line-gradient':['interpolate',['linear'],['line-progress'],0,C.line,1,C.line2]}});
@@ -586,7 +571,7 @@ function addLayers(){
     paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.6,4,4,8,6],'circle-color':C.dot,'circle-stroke-width':1.5,'circle-stroke-color':C.halo}});
   map.addLayer({id:'airport-labels',type:'symbol',source:'airports',minzoom:2.5,
     layout:{'text-field':['get','iata'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.1],'text-anchor':'top'},
-    paint:{'text-color':'#fff','text-halo-color':C.halo,'text-halo-width':1.4}});
+    paint:{'text-color':C.text,'text-halo-color':C.halo,'text-halo-width':1.4}});
   map.addLayer({id:'country-flags',type:'symbol',source:'cflags',
     layout:{'icon-image':['concat','flag-',['get','iso']],'icon-size':['interpolate',['linear'],['zoom'],0,0.5,4,0.75,7,0.95],
       'icon-allow-overlap':false,'symbol-sort-key':['-',['get','area']]}});
@@ -622,7 +607,7 @@ function updateMap(force){
   }
   const hasSel = page===0 && selected!=null;
   map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
-  map.setPaintProperty('flights-sel','line-color', ['case',['get','up'], C.up, C.sel]);
+  map.setPaintProperty('flights-sel','line-color', ['case',['get','up'], C.upSel, C.sel]);
   map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.22 : 0.85);
   map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.3 : 0.85);
   map.setPaintProperty('country-fill','fill-opacity', selCountry ? ['case',['==',['get','iso'],selCountry],0.65,0.28] : 0.42);
