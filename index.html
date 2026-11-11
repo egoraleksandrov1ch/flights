@@ -216,6 +216,8 @@
   .maplibregl-popup-tip{border-top-color:#1c1d22!important;border-bottom-color:#1c1d22!important}
   @media (hover:none){ .row .more{display:none} }
   .mbox.dlg{max-width:400px}
+  img.plane.hero{display:block;width:100%;max-width:460px;height:auto;margin:2px auto 12px}
+  img.plane.mini{width:52px;height:18px;object-fit:contain;flex:none;margin-right:8px}
   @media (max-width:760px){ .mbox.dlg{margin:0 8px calc(8px + var(--safe-b));border-radius:24px} }
   .gi[disabled]{cursor:default}
   .menu hr{display:block}
@@ -1160,7 +1162,7 @@ function openFlightDetail(a){
       <div style="font-size:24px;font-weight:700">${esc(a.a.city)} → ${esc(a.b.city)}</div></div></div>
     <div class="card"><div class="route">${end(a.a,true)}<div class="mid"><div class="pl">✈︎</div>${fmtKm(a.km)} км<br>${f.durMin>0?hm(f.durMin):'≈'+hm(estMin(a.km))}${f.depTime?`<br><b style="color:var(--text);font-size:13px">${f.depTime} → ${f.arrTime}</b>`:''}</div>${end(a.b,false)}</div>
       ${a.up?`<div style="text-align:center;margin-top:10px"><span class="badge">${untilLabel(f.date)}</span></div>`:''}<div style="margin-top:12px">${chipsHTML(f,a.km)}</div></div>
-    ${(f.aircraft||f.reg||f.seat||f.cabin) ? `<div class="card"><h3>Самолёт и место</h3>${grid([['Самолёт', AircraftNames.full(f.aircraft) || f.aircraft],['Борт',f.reg],['Класс',f.cabin?cabinName(f.cabin):''],['Место',f.seat]])}</div>` : ''}
+    ${(f.aircraft||f.reg||f.seat||f.cabin) ? `<div class="card"><h3>Самолёт и место</h3>${planeImg(AircraftNames.full(f.aircraft),'plane hero')}${grid([['Самолёт', AircraftNames.full(f.aircraft) || f.aircraft],['Борт',f.reg],['Класс',f.cabin?cabinName(f.cabin):''],['Место',f.seat]])}</div>` : ''}
     ${al ? `<div class="card"><h3>${logoHTML(code,'sm').replace('logo sm','logo sm" style="width:34px;height:34px')}${esc(al[0])}</h3>${grid([['Позывной',al[2]],['ICAO',al[1]],['IATA',code]])}</div>`
          : f.airline ? `<div class="card"><h3>Авиакомпания</h3><b>${esc(f.airline)}</b></div>` : ''}
     <div class="card"><h3 style="margin-bottom:2px">Моя история на маршруте</h3><div style="color:var(--muted);font-size:14px;margin-bottom:12px">${f.from} → ${f.to}</div>
@@ -1428,8 +1430,18 @@ const AircraftNames = (()=>{
   }
   const maker = f => MAKERS.find(m=>f.startsWith(m)) || 'Другие';
   const isWidebody = f => ['787','777','767','747','A330','A340','A350','A380','A300','A310'].some(x=>f.includes(x));
-  return { full, maker, isWidebody };
+  /** картинка самолёта planes/plane_*.png; если файла нет — картинка просто скрывается */
+  function image(f){
+    if(!f) return null; const has = x=>f.includes(x);
+    const k = has('737 MAX') ? '737max' : has('Boeing 737') ? '737ng' : has('747') ? '747' : has('757') ? '757' : has('767') ? '767'
+      : has('777') ? '777' : has('787') ? '787' : has('A220') ? 'a220' : has('A330') ? 'a330' : has('A350') ? 'a350' : has('A380') ? 'a380'
+      : ['A318','A319','A320','A321'].some(has) ? ((has('neo')||has('LR')) ? 'a320neo' : 'a320ceo')
+      : (f.startsWith('Embraer E1') || f.startsWith('Embraer E2')) ? 'e190' : null;
+    return k ? `planes/plane_${k}.png` : null;
+  }
+  return { full, maker, isWidebody, image };
 })();
+const planeImg = (full, cls='plane') => { const src = AircraftNames.image(full); return src ? `<img class="${cls}" src="${src}" alt="" onerror="this.remove()">` : ''; };
 
 function parseSeat(s){ const t=(s||'').toUpperCase().trim(), m=t.match(/^(\d{1,2})([A-Z])$/); return m && +m[1]>0 ? [+m[1], m[2]] : null; }
 function seatType(l, wide){ if(wide) return 'AKL'.includes(l)?'window':'CDGH'.includes(l)?'aisle':'middle'; return 'AF'.includes(l)?'window':'CD'.includes(l)?'aisle':'middle'; }
@@ -1521,9 +1533,9 @@ function statsHTML(S, period){
   let ac='';
   if(S.aircraft.length){
     const top=S.aircraft[0];
-    ac += `<div style="color:var(--muted);font-size:12px">Чаще всего</div><div style="font-size:28px;font-weight:800;line-height:1.15">${esc(top.label)}</div>
+    ac += planeImg(top.label,'plane hero') + `<div style="color:var(--muted);font-size:12px">Чаще всего</div><div style="font-size:28px;font-weight:800;line-height:1.15">${esc(top.label)}</div>
       <div style="color:var(--accent2);font-size:14px;margin-bottom:6px">${top.n} ${plural(top.n,'перелёт','перелёта','перелётов')} · ${hm(Math.round(top.extra))}</div>`;
-    ac += S.aircraft.slice(0,8).map(c=>hbar(c.label, c.n, top.n, {sub:hm(Math.round(c.extra))})).join('');
+    ac += S.aircraft.slice(0,8).map(c=>hbar(c.label, c.n, top.n, {sub:hm(Math.round(c.extra)), lead:planeImg(c.label,'plane mini')})).join('');
     if(S.makers.length>1){ const tot=S.makers.reduce((s,c)=>s+c.n,0), ps=S.makers.map((c,i)=>({...c,color:PALETTE[i%PALETTE.length]}));
       ac += `<div class="donut" style="margin-top:12px">${donut(ps)}<ul>${ps.map(c=>`<li><i style="background:${c.color}"></i>${esc(c.label)} — ${Math.round(c.n/tot*100)}%</li>`).join('')}</ul></div>`; }
   } else ac += `<div style="color:var(--muted);font-size:14px">Тип самолёта пока не указан ни у одного перелёта.</div>`;
