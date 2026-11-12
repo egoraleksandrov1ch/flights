@@ -216,6 +216,18 @@
   .maplibregl-popup-tip{border-top-color:#1c1d22!important;border-bottom-color:#1c1d22!important}
   @media (hover:none){ .row .more{display:none} }
   .mbox.dlg{max-width:400px}
+  .prog.lap{height:10px}
+  .sub-t{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .lchart .plot{position:relative;height:120px;margin:14px 0 6px}
+  .lchart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  .lchart polyline{fill:none;stroke:var(--accent2);stroke-width:2.5;stroke-linejoin:round}
+  .lchart i{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--accent2);transform:translate(-50%,-50%)}
+  .lchart em{position:absolute;transform:translate(-50%,-170%);font:normal 11px Inter,sans-serif;color:var(--text);white-space:nowrap}
+  .lchart .xl{display:flex;gap:6px}
+  .lchart .xl small{flex:1;text-align:center;font-size:10.5px;color:var(--muted);min-width:0}
+  .layerseg{margin:2px 0 8px}
+  .city-row .lead{font-size:20px}
+
   img.plane.hero{display:block;width:100%;max-width:460px;height:auto;margin:2px auto 12px}
   img.plane.mini{width:52px;height:18px;object-fit:contain;flex:none;margin-right:8px}
   @media (max-width:760px){ .mbox.dlg{margin:0 8px calc(8px + var(--safe-b));border-radius:24px} }
@@ -252,6 +264,7 @@
         <button class="plus" id="addCountry" aria-label="Добавить"></button>
       </div>
       <div class="tiles" id="countryTiles"></div>
+      <div class="seg layerseg" id="layerSeg"><button data-l="countries">🗺 Страны</button><button data-l="cities">📍 Города</button></div>
       <div class="list" id="countryList"></div>
     </section>
   </div>
@@ -509,6 +522,7 @@ const legsCountries = legs => [...new Set(legs.flatMap(l=>[l.from.cc,l.to.cc]).f
 // =====================================================================
 let page = 0, selected = null, selJourney = null, selCountry = null;
 let year = lsGet('flights.year', 'all');
+let layer = lsGet('map.layer', 'countries') === 'cities' ? 'cities' : 'countries';
 let map = null, mapReady = false;
 const EMPTY_FC = {type:'FeatureCollection', features:[]};
 
@@ -574,6 +588,13 @@ function addLayers(){
   map.addLayer({id:'airport-labels',type:'symbol',source:'airports',minzoom:2.5,
     layout:{'text-field':['get','iata'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.1],'text-anchor':'top'},
     paint:{'text-color':C.text,'text-halo-color':C.halo,'text-halo-width':1.4}});
+  map.addSource('cities',{type:'geojson',data:EMPTY_FC});
+  map.addLayer({id:'city-dots',type:'circle',source:'cities',
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,['+',3,['min',['get','n'],6]],6,['+',6,['min',['get','n'],8]]],
+      'circle-color':'#e11d48','circle-stroke-width':2,'circle-stroke-color':'#ffffff'}});
+  map.addLayer({id:'city-labels',type:'symbol',source:'cities',minzoom:2.2,
+    layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':12,'text-offset':[0,1.1],'text-anchor':'top','symbol-sort-key':['-',['get','n']]},
+    paint:{'text-color':C.text,'text-halo-color':C.halo,'text-halo-width':1.5}});
   map.addLayer({id:'country-flags',type:'symbol',source:'cflags',
     layout:{'icon-image':['concat','flag-',['get','iso']],'icon-size':['interpolate',['linear'],['zoom'],0,0.5,4,0.75,7,0.95],
       'icon-allow-overlap':false,'symbol-sort-key':['-',['get','area']]}});
@@ -600,7 +621,10 @@ function updateMap(force){
     geometry:{type:'LineString', coordinates:greatCircle(a.a,a.b)}}))});
   const ap = {}; for(const a of arcs) for(const p of [a.a,a.b]) ap[p.iata] ??= p;
   map.getSource('airports').setData({type:'FeatureCollection', features:Object.values(ap).map(p=>({type:'Feature',properties:{iata:p.iata},geometry:{type:'Point',coordinates:[p.lon,p.lat]}}))});
-  const fills = currentFills(), key = page+'|'+selJourney+'|'+Object.keys(fills).sort().join(',')+'|'+flights.length+'|'+trips.length;
+  const cityMode = page===1 && layer==='cities';
+  const fills = cityMode ? {} : currentFills(), key = page+'|'+layer+'|'+selJourney+'|'+Object.keys(fills).sort().join(',')+'|'+flights.length+'|'+trips.length;
+  map.getSource('cities').setData({type:'FeatureCollection', features: cityMode ? currentCities().map(c=>({type:'Feature',
+    properties:{name:c.name, n:c.visits, key:c.key}, geometry:{type:'Point', coordinates:[c.lon,c.lat]}})) : []});
   if(force || key!==lastFillKey){
     lastFillKey = key;
     map.getSource('countries').setData(fillsGeo(fills));
@@ -849,7 +873,7 @@ $('#flyShare').onclick = ()=>ShareModal.open('fly');
 function journeyRow(j){
   const n=journeyArcs(j).length, t=journeyTrips(j).length, up = j.start > todayStr();
   return `<div class="row${selJourney===j.id?' on':''}" data-j="${j.id}" style="align-items:center">
-    <div class="lead" style="font-size:18px">${j.countries.slice(0,3).map(cc=>flagHTML(cc,18)).join('')}</div>
+    <div class="lead" style="font-size:18px;display:flex;gap:4px;flex:none;margin-right:4px">${j.countries.slice(0,3).map(cc=>flagHTML(cc,18)).join('')}</div>
     <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px;display:flex;gap:8px;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis">${esc(journeyTitle(j))}</span>${up?`<span class="badge">${untilLabel(j.start)}</span>`:''}</div>
       <div class="sub">${[journeyDates(j), n?`✈ ${n}`:null, t?`🚌 ${t}`:null].filter(Boolean).join(' · ')}</div></div>
     <button class="more" aria-label="Ещё">${ICON.dots}</button></div>`;
@@ -870,6 +894,7 @@ function countryRow(v){
     ${v.manual?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
 }
 function renderCountry(){
+  document.querySelectorAll('#layerSeg button').forEach(b=>b.classList.toggle('on', b.dataset.l===layer));
   const vm = visitedMap(), visited = Object.values(vm).sort((a,b)=>countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
   const countries = visited.filter(v=>isCountry(v.cc)), terr = visited.filter(v=>!isCountry(v.cc));
   $('#countryTiles').innerHTML = [[countries.length, plural(countries.length,'страна','страны','стран')],[Math.round(countries.length/195*100)+'%','мира'],[terr.length,'террит.'],[journeys.length,'путеш.']]
@@ -882,9 +907,16 @@ function renderCountry(){
   let h='';
   if(js.length) h += `<div class="sec">Путешествия</div>` + js.map(journeyRow).join('');
   if(tg.length) h += `<div class="sec">Наземные поездки</div>` + tg.map(tripRow).join('');
-  if(countries.length) h += `<div class="sec">Страны</div>` + countries.map(countryRow).join('');
-  if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
+  if(layer==='cities'){
+    const cs = currentCities();
+    h += `<div class="sec">Города · ${cs.length}</div>` + (cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`);
+  } else {
+    if(countries.length) h += `<div class="sec">Страны</div>` + countries.map(countryRow).join('');
+    if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
+  }
   list.innerHTML = h;
+  list.querySelectorAll('[data-city]').forEach(el=>{ el.onclick = ()=>{ const c=currentCities().find(x=>x.key===el.dataset.city);
+    if(c && mapReady){ setDetent('low'); setTimeout(()=>map.easeTo({center:[c.lon,c.lat], zoom:7, padding:insets(), duration:900}), 80); } }; });
   list.querySelectorAll('[data-j]').forEach(el=>{
     const j = journeys.find(x=>x.id===Number(el.dataset.j));
     const menu = ()=>[{label:'Изменить', act:()=>openJourneyForm(j)}, {label:'Удалить путешествие', danger:true, act:()=>confirmDialog('Удалить это путешествие?','Удалить',()=>{ if(selJourney===j.id) selJourney=null; journeys=journeys.filter(x=>x.id!==j.id); saveJourneys(); })}];
@@ -908,7 +940,8 @@ function renderCountry(){
   });
 }
 function deleteTrip(legs){ const ids=new Set(legs.map(l=>l.id)); trips = trips.filter(t=>!ids.has(t.id)); saveTrips(); }
-$('#countryTiles').onclick = ()=>openStats('all');
+$('#countryTiles').onclick = ()=>openCountryStats('all');
+$('#layerSeg').onclick = e=>{ const b=e.target.closest('[data-l]'); if(!b) return; layer=b.dataset.l; lsSet('map.layer', layer); selCountry=null; refresh(); };
 $('#countryShare').onclick = ()=>ShareModal.open('country');
 $('#addCountry').onclick = e=>popMenu(e.currentTarget, [
   {label:'🏳  Отметить страны', act:()=>openManualPicker()},
@@ -1500,12 +1533,23 @@ function vbars(items, {cls='', labels=true, hi=null, every=1}={}){
   const max=Math.max(1,...items.map(x=>x.n));
   return `<div class="vbars ${cls}">${items.map((c,i)=>`<div class="c"><em>${c.n||''}</em><i style="height:${c.n/max*100}%;${hi&&hi(c)?'background:linear-gradient(var(--accent),#e88e2a)':''}"></i><small>${labels && i%every===0 ? c.label : '&nbsp;'}</small></div>`).join('')}</div>`;
 }
+/** полоса «кругов»: пройденные круги — залито целиком, текущий круг — темнее поверх */
+function lapBar(x, tone){
+  const laps = Math.floor(x), frac = x - laps;
+  const base = tone==='blue' ? 'var(--accent2)' : 'var(--accent)', dark = tone==='blue' ? '#1f6f93' : '#9a5a12';
+  const what = tone==='blue' ? 'круг' : 'путь';
+  if(laps < 1) return `<div class="prog lap"><i style="width:${frac*100}%;background:${base}"></i></div>`;
+  return `<div class="prog lap" style="background:${base}"><i style="width:${frac*100}%;background:${dark}"></i></div>
+    <div class="gfoot" style="margin:-4px 0 6px">${laps} ${what==='круг'?plural(laps,'полный круг','полных круга','полных кругов'):plural(laps,'полный путь','полных пути','полных путей')} · идёт ${laps+1}-й: ${Math.round(frac*100)}%</div>`;
+}
+/** линия по годам: точки стоят ровно под столбиками, растягивается на всю ширину */
 function lineChart(items){
-  if(items.length<2) return '';
-  const W=320, H=110, p=14, max=Math.max(...items.map(x=>x.extra),1);
-  const pts = items.map((c,i)=>[p + i*(W-2*p)/(items.length-1), H-p - c.extra/max*(H-2*p)]);
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:120px;margin-top:6px"><polyline fill="none" stroke="var(--accent2)" stroke-width="2.5" stroke-linejoin="round" points="${pts.map(q=>q.join(',')).join(' ')}"/>
-    ${pts.map(([x,y],i)=>`<circle cx="${x}" cy="${y}" r="3.5" fill="var(--accent2)"/><text x="${x}" y="${H-1}" font-size="9" fill="#8a93a8" text-anchor="middle">${items[i].label}</text>`).join('')}</svg>`;
+  const n=items.length; if(n<2) return '';
+  const max=Math.max(...items.map(x=>x.extra),1);
+  const pts=items.map((c,i)=>[(i+0.5)/n*100, 92 - c.extra/max*84]);
+  return `<div class="lchart"><div class="plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts.map(q=>q.join(',')).join(' ')}" vector-effect="non-scaling-stroke"/></svg>
+    ${pts.map(([x,y],i)=>`<i style="left:${x}%;top:${y}%"></i><em style="left:${x}%;top:${y}%">${kmShort(items[i].extra)}</em>`).join('')}</div>
+    <div class="xl">${items.map(c=>`<small>${c.label}</small>`).join('')}</div></div>`;
 }
 function donut(parts, size=110){
   const total = parts.reduce((s,p)=>s+p.n,0) || 1; let acc=0;
@@ -1521,10 +1565,10 @@ function statsHTML(S, period){
   h += card('Обзор','✨', `<div class="big">${bigv(S.arcs.length, plural(S.arcs.length,'перелёт','перелёта','перелётов'))}${bigv(kmShort(S.km),'километров')}${bigv(hm(S.minutes),'в воздухе')}${bigv(S.airports.length,'аэропортов')}
     ${bigv(S.countries.length, plural(S.countries.length,'страна','страны','стран')+' перелётами')}${bigv(alN,'авиакомпаний')}${bigv(S.aircraft.length,'типов самолётов')}${bigv(S.arcs.length?fmtKm(S.km/S.arcs.length)+' км':'—','средний перелёт')}</div>`);
   const earth=S.km/40075, moon=S.km/384400;
-  h += card('Вокруг Земли и до Луны','🌍', `<div style="font-size:22px;font-weight:700">${earth.toFixed(2)}× вокруг экватора</div><div class="prog"><i style="width:${(earth>=1?earth-Math.floor(earth):earth)*100}%"></i></div>
-    <div style="color:var(--muted);font-size:14px">${moon<1 ? (moon*100).toFixed(1)+'% пути до Луны' : moon.toFixed(2)+'× до Луны'}</div><div class="prog"><i style="width:${Math.min(1,moon)*100}%;background:var(--accent)"></i></div>`);
+  h += card('Вокруг Земли и до Луны','🌍', `<div style="font-size:22px;font-weight:700">${earth.toFixed(2)}× вокруг экватора</div>${lapBar(earth,'blue')}
+    <div style="font-size:22px;font-weight:700;margin-top:6px">${moon<1 ? (moon*100).toFixed(1)+'% пути до Луны' : moon.toFixed(2)+'× до Луны'}</div>${lapBar(moon,'orange')}`);
   if(period==='all' && S.perYear.length>1)
-    h += card('По годам','📅', vbars(S.perYear) + lineChart(S.perYear) + `<div class="gfoot">Километры по годам</div>`);
+    h += card('По годам','📅', `<div class="sub-t">Перелёты, шт.</div>` + vbars(S.perYear) + `<div class="sub-t" style="margin-top:18px">Километры</div>` + lineChart(S.perYear));
   h += card(period==='all'?'Сезонность':'По месяцам','📊', vbars(S.perMonth,{cls:'blue'}));
   const topWd = S.weekday.reduce((b,c)=>c.n>b.n?c:b, S.weekday[0]);
   h += card('Дни недели','🗓', vbars(S.weekday,{cls:'blue', hi:c=>c.label==='сб'||c.label==='вс'}) + (topWd.n?`<div class="gfoot">Чаще всего летаете: ${topWd.label}</div>`:''));
@@ -2129,6 +2173,124 @@ const ShareModal = (()=>{
   }
   return { open };
 })();
+
+// =====================================================================
+//  Города, части света, статистика путешествий и стран
+// =====================================================================
+/** города из перелётов (город аэропорта) и наземных поездок; близкие точки (≤40 км) — один город */
+function citiesFrom(arcs, ts){
+  const pts = [];
+  for(const a of arcs) for(const p of [a.a,a.b]) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:p.country, lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
+  for(const t of ts) for(const p of [t.from,t.to]) if(p && p.lat!=null) pts.push({name:p.name, cc:(p.cc||'').toUpperCase(), lat:+p.lat, lon:+p.lon, date:t.date||'', air:false});
+  const cl = [], norm = s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zа-я0-9]/g,'');
+  // сначала наземные (точный центр города), потом аэропорты
+  for(const p of [...pts.filter(x=>!x.air), ...pts.filter(x=>x.air)]){
+    let c = cl.find(c=>c.cc===p.cc && (norm(c.names[0][0])===norm(p.name) || dist(c,p) < 40));
+    if(!c){ c = {cc:p.cc, lat:p.lat, lon:p.lon, names:[], dates:new Set(), air:0, ground:0}; cl.push(c); }
+    const nm = c.names.find(x=>x[0]===p.name); nm ? nm[1]++ : c.names.push([p.name,1]);
+    if(p.date) c.dates.add(p.date); p.air ? c.air++ : c.ground++;
+  }
+  return cl.map(c=>{ const name = [...c.names].sort((a,b)=>b[1]-a[1])[0][0];
+    return { key:c.cc+':'+name, name, cc:c.cc, lat:c.lat, lon:c.lon, visits:Math.max(1,c.dates.size), air:c.air, ground:c.ground,
+      last:[...c.dates].sort().pop()||'' }; })
+    .sort((a,b)=>b.visits-a.visits || a.name.localeCompare(b.name));
+}
+function currentCities(){
+  const j = journeys.find(x=>x.id===selJourney);
+  if(j) return citiesFrom(journeyArcs(j).filter(a=>!a.up), journeyTrips(j));
+  return citiesFrom(doneArcs(), trips.filter(doneTrip));
+}
+function cityRow(c){
+  const sub = [c.visits>1 ? `${c.visits} ${plural(c.visits,'визит','визита','визитов')}` : null, c.air?'✈':null, c.ground?'🚌':null, c.last?dateShort(c.last):null].filter(Boolean).join(' · ');
+  return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">${flagHTML(c.cc,22)}</div>
+    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">${esc(sub)}</div></div></div>`;
+}
+
+const CONTINENTS = {
+  'Европа':'AD AL AT BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GG GI GR HR HU IE IM IS IT JE LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS RU SE SI SK SM UA VA XK AX SJ',
+  'Азия':'AE AF AM AZ BD BH BN BT CN GE HK ID IL IN IQ IR JO JP KG KH KP KR KW KZ LA LB LK MM MN MO MV MY NP OM PH PK PS QA SA SG SY TH TJ TL TM TR TW UZ VN YE',
+  'Африка':'AO BF BI BJ BW CD CF CG CI CM CV DJ DZ EG EH ER ET GA GH GM GN GQ GW KE KM LR LS LY MA MG ML MR MU MW MZ NA NE NG RE RW SC SD SL SN SO SS ST SZ TD TG TN TZ UG YT ZA ZM ZW SH',
+  'Северная Америка':'AG AI AW BB BL BM BQ BS BZ CA CR CU CW DM DO GD GL GP GT HN HT JM KN KY LC MF MQ MS MX NI PA PM PR SV SX TC TT US VC VG VI',
+  'Южная Америка':'AR BO BR CL CO EC FK GF GY PE PY SR UY VE',
+  'Океания':'AS AU CK FJ FM GU KI MH MP NC NF NR NU NZ PF PG PN PW SB TK TO TV VU WF WS',
+};
+const CONT_OF = {}; for(const [k,v] of Object.entries(CONTINENTS)) for(const cc of v.split(' ')) CONT_OF[cc]=k;
+
+function countryStatsData(period){
+  const today = todayStr(), all = period==='all', inP = d => all || (d||'').startsWith(period);
+  const arcs = doneArcs().filter(a=>inP(a.f.date)), ts = trips.filter(t=>doneTrip(t) && inP(t.date)), js = journeys.filter(j=>j.start<=today && (all || j.start.startsWith(period) || j.end.startsWith(period)));
+  const vm = all ? visitedMap() : collect(arcs, js, [], ts);
+  const codes = Object.keys(vm), countries = codes.filter(isCountry), terr = codes.filter(c=>!isCountry(c));
+  // когда страна появилась впервые (по всем данным)
+  const first = {}, seen = (cc, d)=>{ if(cc && d && (!first[cc] || d<first[cc])) first[cc]=d; };
+  for(const a of doneArcs()) for(const p of [a.a,a.b]) seen(p.country, a.f.date);
+  for(const t of trips.filter(doneTrip)) for(const p of [t.from,t.to]) seen((p.cc||'').toUpperCase(), t.date);
+  for(const j of journeys.filter(j=>j.start<=today)) for(const cc of j.countries) seen(cc, j.start);
+  const newBy = {}; for(const [cc,d] of Object.entries(first)) if(isCountry(cc)) (newBy[d.slice(0,4)] ??= []).push(cc);
+  const conts = Object.keys(CONTINENTS).map(k=>{ const total=[...SOVEREIGN].filter(c=>CONT_OF[c]===k).length, got=countries.filter(c=>CONT_OF[c]===k);
+    return {label:k, n:got.length, total, codes:got}; });
+  const top = countries.map(cc=>({cc, n:vm[cc].flights+vm[cc].trips+vm[cc].journeys, v:vm[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
+  const days = j => Math.round((new Date(j.end+'T12:00') - new Date(j.start+'T12:00'))/864e5) + 1;
+  const groups = {}; for(const t of ts){ (groups[t.group ?? t.id] ??= []).push(t); }
+  const gl = Object.values(groups), gkm = g=>g.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
+  const byMode = {}; for(const t of ts) byMode[t.mode]=(byMode[t.mode]||0)+(+t.km||dist(t.from,t.to));
+  const jYears = {}; for(const j of journeys.filter(j=>j.start<=today)) jYears[j.start.slice(0,4)]=(jYears[j.start.slice(0,4)]||0)+1;
+  return { vm, countries, terr, cities:citiesFrom(arcs, ts), conts, top, first, newBy, period,
+    js, jDays: js.reduce((s,j)=>s+days(j),0), longest: js.reduce((b,j)=>!b||days(j)>days(b)?j:b, null), days,
+    gl, gkm, groundKm: gl.reduce((s,g)=>s+gkm(g),0), byMode, jYears:Object.keys(jYears).sort().map(k=>({label:k,n:jYears[k]})) };
+}
+
+function countryStatsHTML(D){
+  const nC = D.countries.length;
+  if(!nC && !D.terr.length && !D.cities.length) return `<div class="empty"><div class="ico">🌍</div>За этот период стран нет</div>`;
+  let h = '';
+  h += card('Обзор','✨', `<div class="big">${bigv(nC, plural(nC,'страна','страны','стран'))}${bigv(Math.round(nC/195*100)+'%','мира')}
+    ${bigv(D.cities.length, plural(D.cities.length,'город','города','городов'))}${bigv(D.terr.length,'территорий и островов')}
+    ${bigv(D.js.length, plural(D.js.length,'путешествие','путешествия','путешествий'))}${bigv(D.jDays, plural(D.jDays,'день','дня','дней')+' в путешествиях')}
+    ${bigv(D.gl.length,'наземных поездок')}${bigv(kmShort(D.groundKm),'км по земле')}</div>
+    <div class="gfoot" style="margin-top:12px">Мир: ${nC} из 195</div><div class="prog lap"><i style="width:${nC/195*100}%;background:var(--green)"></i></div>`);
+  h += card('Части света','🧭', D.conts.map(c=>hbar(c.label, c.n, c.total, {sub:`из ${c.total}`, color:'var(--green)'})).join('')
+    + `<div class="gfoot" style="margin-top:6px">Посещено частей света: ${D.conts.filter(c=>c.n).length} из 6</div>`);
+  if(D.top.length) h += card('Где бывали чаще всего','📍', D.top.slice(0,8).map(t=>{ const v=t.v;
+      return hbar(countryName(t.cc), t.n, D.top[0].n, {lead:flagHTML(t.cc,18), color:'var(--green)', sub:[v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null].filter(Boolean).join(' ')}); }).join('')
+    + `<div class="gfoot">Считаются перелёты в страну и из неё, наземные участки и путешествия.</div>`);
+  if(D.period==='all'){
+    const ny = Object.keys(D.newBy).sort().map(k=>({label:k, n:D.newBy[k].length}));
+    if(ny.length) h += card('Новые страны по годам','🆕', vbars(ny,{cls:'green'}));
+  } else {
+    const nw = D.newBy[D.period] || [];
+    h += card(`Впервые в ${D.period}`,'🆕', nw.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${nw.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}</span>`).join('')}</div>` : `<div style="color:var(--muted);font-size:14px">Новых стран в этом году не было</div>`);
+  }
+  if(D.cities.length) h += card('Города','🏙', `<div style="font-size:22px;font-weight:700;margin-bottom:4px">${D.cities.length} ${plural(D.cities.length,'город','города','городов')}</div>`
+    + D.cities.slice(0,8).map(c=>hbar(c.name, c.visits, D.cities[0].visits, {lead:flagHTML(c.cc,18), color:'#e11d48', sub:plural(c.visits,'визит','визита','визитов')})).join('')
+    + `<div class="gfoot">Визит — отдельная дата перелёта или поездки. Аэропорты рядом с городом считаются этим городом.</div>`);
+  if(D.js.length){
+    const L = D.longest;
+    h += card('Путешествия','🧳', `<div class="big">${bigv(D.js.length,'путешествий')}${bigv(Math.round(D.jDays/D.js.length*10)/10,'дней в среднем')}</div>`
+      + (L ? `<div class="gfoot" style="margin-top:10px">Самое долгое: <b style="color:var(--text)">${esc(journeyTitle(L))}</b> — ${D.days(L)} ${plural(D.days(L),'день','дня','дней')} (${journeyDates(L)})</div>` : '')
+      + (D.period==='all' && D.jYears.length>1 ? `<div class="sub-t" style="margin-top:14px">Путешествий в год</div>` + vbars(D.jYears) : ''));
+  }
+  if(D.gl.length){
+    const long = D.gl.reduce((b,g)=>!b||D.gkm(g)>D.gkm(b)?g:b, null), mx = Math.max(...Object.values(D.byMode));
+    h += card('Наземные поездки','🚌', `<div class="big">${bigv(D.gl.length,'поездок')}${bigv(kmShort(D.groundKm),'км (по прямой)')}</div>`
+      + Object.keys(MODES).filter(k=>D.byMode[k]).map(k=>hbar(MODES[k].name, Math.round(D.byMode[k]), mx, {lead:MODES[k].ico, color:'var(--accent2)', sub:'км'})).join('')
+      + (long ? `<div class="gfoot" style="margin-top:8px">Самая длинная: ${esc(legsTitle(long))} — ${fmtKm(D.gkm(long))} км</div>` : ''));
+  }
+  if(D.terr.length) h += card('Территории и острова','🏝', `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${D.terr.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}</span>`).join('')}</div>`);
+  return h;
+}
+function openCountryStats(initial='all'){
+  const today = todayStr();
+  const ys = new Set([...flights.filter(f=>f.date && f.date<=today).map(f=>f.date.slice(0,4)), ...trips.filter(t=>t.date && t.date<=today).map(t=>t.date.slice(0,4)), ...journeys.filter(j=>j.start<=today).map(j=>j.start.slice(0,4))]);
+  const periods = ['all', ...[...ys].sort().reverse()];
+  let period = periods.includes(initial) ? initial : 'all';
+  const m = openModal({title:'Страны и путешествия', left:null, right:'Готово', cls:'tall wide'});
+  function paint(){
+    m.body.innerHTML = `<div class="pchips">${periods.map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p==='all'?'Всё время':p}</button>`).join('')}</div>` + countryStatsHTML(countryStatsData(period));
+    m.body.querySelector('.pchips').onclick = e=>{ const b=e.target.closest('[data-p]'); if(b){ period=b.dataset.p; paint(); } };
+  }
+  paint();
+}
 
 // =====================================================================
 //  Запуск
