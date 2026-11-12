@@ -373,6 +373,17 @@ let flights  = loadJ('flights.v1', []);
 let trips    = loadJ('trips.v1', []);
 let journeys = loadJ('journeys.v1', []);
 let manual   = loadJ('countries.v1', []);
+let homes    = loadJ('homes.v1', []);   // где живу: [{id,name,cc,lat,lon,from,to}] — эти места не считаются путешествиями
+function saveHomes(){ saveJ('homes.v1', homes); refresh(); }
+/** дом на дату: город (≤40 км от дома) или только страна; без даты — считаем «сегодня» */
+function homeAt(cc, lat, lon, date){
+  const d = date || todayStr();
+  for(const h of homes){
+    if(h.cc!==cc || (h.from && d < h.from) || (h.to && d > h.to)) continue;
+    return (lat!=null && dist(h, {lat, lon}) < 40) ? 'city' : 'country';
+  }
+  return null;
+}
 function saveFlights(){ saveJ('flights.v1', flights); refresh(); }
 function saveTrips(){ saveJ('trips.v1', trips); refresh(); }
 function saveJourneys(){ saveJ('journeys.v1', journeys); refresh(); }
@@ -594,7 +605,7 @@ function addLayers(){
   map.addSource('cities',{type:'geojson',data:EMPTY_FC});
   map.addLayer({id:'city-dots',type:'circle',source:'cities',
     paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,['+',3,['min',['get','n'],6]],6,['+',6,['min',['get','n'],8]]],
-      'circle-color':'#e11d48','circle-stroke-width':2,'circle-stroke-color':'#ffffff'}});
+      'circle-color':['case',['get','home'],'#2563eb','#e11d48'],'circle-stroke-width':2,'circle-stroke-color':'#ffffff'}});
   map.addLayer({id:'city-labels',type:'symbol',source:'cities',minzoom:2.2,
     layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':12,'text-offset':[0,1.1],'text-anchor':'top','symbol-sort-key':['-',['get','n']]},
     paint:{'text-color':C.text,'text-halo-color':C.halo,'text-halo-width':1.5}});
@@ -627,7 +638,7 @@ function updateMap(force){
   const cityMode = page===1 && layer==='cities';
   const fills = cityMode ? {} : currentFills(), key = page+'|'+layer+'|'+selJourney+'|'+Object.keys(fills).sort().join(',')+'|'+flights.length+'|'+trips.length;
   map.getSource('cities').setData({type:'FeatureCollection', features: cityMode ? currentCities().map(c=>({type:'Feature',
-    properties:{name:c.name, n:c.visits, key:c.key}, geometry:{type:'Point', coordinates:[c.lon,c.lat]}})) : []});
+    properties:{name:(c.home?'🏠 ':'')+c.name, n:c.home?4:c.visits, key:c.key, home:c.home}, geometry:{type:'Point', coordinates:[c.lon,c.lat]}})) : []});
   if(force || key!==lastFillKey){
     lastFillKey = key;
     map.getSource('countries').setData(fillsGeo(fills));
@@ -912,7 +923,7 @@ function renderCountry(){
   if(tg.length) h += `<div class="sec">Наземные поездки</div>` + tg.map(tripRow).join('');
   if(layer==='cities'){
     const cs = currentCities();
-    h += `<div class="sec">Города · ${cs.length}</div>` + (cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`);
+    h += `<div class="sec">Города · ${cs.filter(c=>!c.home).length}</div>` + (cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`);
   } else {
     if(countries.length) h += `<div class="sec">Страны</div>` + countries.map(countryRow).join('');
     if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
@@ -1368,9 +1379,12 @@ function openProfile(){
         <li style="list-style:none;margin-left:-20px;color:var(--muted);font-size:12.5px">Бесплатно: 400 единиц в месяц. Поиск по маршруту — 4, по номеру — 2. Данные за последний год и на год вперёд.</li>
       </ol></details></div>
     <div class="gfoot">С ключом при добавлении перелёта можно найти рейсы по маршруту и дате или подтянуть данные по номеру: время, самолёт, борт. Ключ хранится только в этом браузере.</div>
+    <div class="ghead">Где я живу</div>
+    <div class="grp" id="pfHomes"></div>
+    <div class="gfoot">Пока вы живёте в городе, он не считается путешествием: не попадает в топ городов и стран. Перелёты и поездки отсюда остаются.</div>
     <div class="ghead">Данные</div>
     <div class="grp"><button class="gi link" id="pfImp">⬇︎ Импорт из файла</button><button class="gi link" id="pfExp">⬆︎ Экспорт (сохранить копию)</button></div>
-    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
+    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны, места жительства и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
     <div class="grp" style="margin-top:18px"><button class="gi danger" id="pfClr">Удалить все данные</button></div>
     <input type="file" id="pfFile" accept=".json,application/json" hidden>`;
   const q = x=>m.body.querySelector(x), key=q('#pfKey');
@@ -1378,6 +1392,14 @@ function openProfile(){
   key.oninput = ()=>{ lsSet(API.keyName, key.value.trim()); paintKey(); };
   q('#pfEye').onclick = ()=>{ key.type = key.type==='password' ? 'text' : 'password'; };
   q('#pfExp').onclick = exportData;
+  const paintHomes = ()=>{
+    const box = q('#pfHomes'), hs = [...homes].sort((a,b)=>(b.from||'').localeCompare(a.from||''));
+    box.innerHTML = hs.map(h=>`<button class="gi" data-h="${h.id}"><span style="font-size:20px">🏠</span><span style="min-width:0"><div>${flagEmoji(h.cc)} ${esc(h.name)}</div>
+      <div style="font-size:12px;color:var(--muted)">${h.from?'с '+fmtDate(h.from):'всегда'}${h.to?' по '+fmtDate(h.to):' — сейчас'}</div></span><span style="margin-left:auto;color:#555">›</span></button>`).join('')
+      + `<button class="gi link" data-h="new">＋ Добавить место жительства</button>`;
+    box.onclick = e=>{ const b=e.target.closest('[data-h]'); if(b) openHomeForm(b.dataset.h==='new' ? null : homes.find(h=>String(h.id)===b.dataset.h), paintHomes); };
+  };
+  paintHomes();
   q('#pfImp').onclick = ()=>q('#pfFile').click();
   q('#pfFile').onchange = async e=>{ const file=e.target.files[0]; e.target.value=''; if(!file) return;
     let r; try{ r = parseImport(JSON.parse(await file.text())); }catch(err){ return alertDialog('Не удалось прочитать файл', ''); }
@@ -1389,6 +1411,33 @@ function openProfile(){
   q('#pfClr').onclick = ()=>confirmDialog('Удалить все перелёты, путешествия и отметки?','Удалить всё',()=>{ flights=[]; journeys=[]; manual=[]; trips=[]; selected=selJourney=selCountry=null;
     saveJ('flights.v1',[]); saveJ('journeys.v1',[]); saveJ('countries.v1',[]); saveJ('trips.v1',[]); m.close(); refresh(); }, 'Совет: сначала сделайте экспорт.');
 }
+function openHomeForm(editing, done){
+  const s = { place: editing ? {name:editing.name, cc:editing.cc, lat:editing.lat, lon:editing.lon, sub:editing.sub||''} : null,
+    from: editing?.from || '', hasTo: !!editing?.to, to: editing?.to || todayStr() };
+  const m = openModal({title: editing ? 'Место жительства' : 'Где я живу', right: editing ? 'Сохранить' : 'Добавить', onRight: save});
+  m.body.innerHTML = `<div class="ghead">Город</div><div class="grp"><button class="gi" id="hfP"></button></div>
+    <div class="ghead">Когда</div><div class="grp"><div class="gi"><span class="lbl">Живу с</span><input type="date" id="hfF" style="text-align:right;color-scheme:dark"></div>
+      <div class="gi"><span>Уже переехал</span><span class="toggle" id="hfT"></span></div><div class="gi" id="hfTR"><span class="lbl">Жил по</span><input type="date" id="hfTo" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="gfoot">Если дату «с» не указать, город считается домом всегда. Можно добавить несколько мест — например, где жили раньше.</div>
+    ${editing ? '<div class="grp"><button class="gi danger" id="hfDel">Удалить</button></div>' : ''}`;
+  const q = x=>m.body.querySelector(x);
+  q('#hfF').value = s.from; q('#hfTo').value = s.to;
+  function paint(){
+    q('#hfP').innerHTML = s.place ? `<span>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</span>` : '<span style="color:var(--muted)">Выбрать город</span>';
+    q('#hfT').classList.toggle('on', s.hasTo); q('#hfTR').hidden = !s.hasTo; m.setRight(!!s.place);
+  }
+  q('#hfP').onclick = ()=>pickPlace(p=>{ s.place=p; paint(); });
+  q('#hfF').onchange = e=>{ s.from = e.target.value; };
+  q('#hfTo').onchange = e=>{ s.to = e.target.value || todayStr(); };
+  q('#hfT').parentElement.onclick = ()=>{ s.hasTo=!s.hasTo; paint(); };
+  if(editing) q('#hfDel').onclick = ()=>{ homes = homes.filter(h=>h.id!==editing.id); m.close(); saveHomes(); done?.(); };
+  function save(){
+    const h = { id: editing?.id ?? Date.now(), name:s.place.name, cc:s.place.cc, lat:s.place.lat, lon:s.place.lon, from:s.from, to: s.hasTo ? s.to : '' };
+    homes = editing ? homes.map(x=>x.id===editing.id ? h : x) : [...homes, h];
+    m.close(); saveHomes(); done?.();
+  }
+  paint();
+}
 function parseImport(obj){
   const raw = Array.isArray(obj) ? obj : obj?.flights; if(!Array.isArray(raw)) throw new Error('bad');
   const num = v=> typeof v==='number' ? v : (parseInt(v)||Date.now());
@@ -1397,7 +1446,8 @@ function parseImport(obj){
   const ts = (obj?.trips||[]).filter(t=>t && t.from && t.to && t.from.lat!=null && t.to.lat!=null).map(t=>({ ...t, id:num(t.id), mode:t.mode||'bus', date:t.date||'', note:t.note||'', km: +t.km || Math.round(dist(t.from,t.to)) }));
   const mn = (obj?.countries||[]).filter(x=>typeof x==='string');
   const apiKey = String(obj?.settings?.aerodataboxKey || '').trim();
-  return { flights:fl, journeys:js, trips:ts, manual:mn, apiKey };
+  const hm = (obj?.homes||[]).filter(h=>h && h.cc && h.lat!=null);
+  return { flights:fl, journeys:js, trips:ts, manual:mn, apiKey, homes:hm };
 }
 function mergeFlights(cur, inc){
   // тот же перелёт (маршрут + дата) не дублируем, а дополняем пустые поля: самолёт, борт, время…
@@ -1412,6 +1462,7 @@ function mergeFlights(cur, inc){
 }
 function applyImport(r, replace){
   if(r.apiKey && !API.hasKey) lsSet(API.keyName, r.apiKey);   // ключ из бэкапа, если здесь его ещё нет
+  if(r.homes?.length){ const ids=new Set(homes.map(h=>h.id)); homes = replace ? r.homes : homes.concat(r.homes.filter(h=>!ids.has(h.id))); saveJ('homes.v1', homes); }
   if(replace){ flights=r.flights; journeys=r.journeys; trips=r.trips; manual=r.manual; selected=selJourney=selCountry=null; }
   else {
     const add = (arr, items)=>{ const ids=new Set(arr.map(x=>x.id)); return arr.concat(items.filter(x=>!ids.has(x.id))); };
@@ -1420,7 +1471,7 @@ function applyImport(r, replace){
   saveJ('flights.v1',flights); saveJ('journeys.v1',journeys); saveJ('trips.v1',trips); saveJ('countries.v1',manual); refresh();
 }
 function exportData(){
-  const out = { version:3, flights, journeys, trips, countries:manual };
+  const out = { version:3, flights, journeys, trips, countries:manual, homes };
   if(API.hasKey) out.settings = { aerodataboxKey: API.key };   // ключ — чтобы не вводить заново
   const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`flights-${todayStr()}.json`; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -2190,12 +2241,14 @@ function citiesFrom(arcs, ts){
     let c = cl.find(c=>c.cc===p.cc && (norm(c.names[0][0])===norm(p.name) || dist(c,p) < 40));
     if(!c){ c = {cc:p.cc, lat:p.lat, lon:p.lon, names:[], dates:new Set(), air:0, ground:0}; cl.push(c); }
     const nm = c.names.find(x=>x[0]===p.name); nm ? nm[1]++ : c.names.push([p.name,1]);
+    if(homeAt(p.cc, p.lat, p.lon, p.date)==='city'){ c.home = true; continue; }   // жизнь дома — не визит
     if(p.date) c.dates.add(p.date); p.air ? c.air++ : c.ground++;
   }
+  for(const h of homes){ const c = cl.find(c=>c.cc===h.cc && dist(c,h) < 40); if(c) c.home = true; }
   return cl.map(c=>{ const name = [...c.names].sort((a,b)=>b[1]-a[1])[0][0];
-    return { key:c.cc+':'+name, name, cc:c.cc, lat:c.lat, lon:c.lon, visits:Math.max(1,c.dates.size), air:c.air, ground:c.ground,
-      last:[...c.dates].sort().pop()||'' }; })
-    .sort((a,b)=>b.visits-a.visits || a.name.localeCompare(b.name));
+    return { key:c.cc+':'+name, name, cc:c.cc, lat:c.lat, lon:c.lon, visits:c.home ? c.dates.size : Math.max(1,c.dates.size), air:c.air, ground:c.ground,
+      home:!!c.home, last:[...c.dates].sort().pop()||'' }; })
+    .sort((a,b)=>(a.home-b.home) || b.visits-a.visits || a.name.localeCompare(b.name));
 }
 function currentCities(){
   const j = journeys.find(x=>x.id===selJourney);
@@ -2203,6 +2256,8 @@ function currentCities(){
   return citiesFrom(doneArcs(), trips.filter(doneTrip));
 }
 function cityRow(c){
+  if(c.home) return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">🏠</div>
+    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">дом${c.visits?` · поездок сюда, когда жили не здесь: ${c.visits}`:''}</div></div></div>`;
   const sub = [c.visits>1 ? `${c.visits} ${plural(c.visits,'визит','визита','визитов')}` : null, c.air?'✈':null, c.ground?'🚌':null, c.last?dateShort(c.last):null].filter(Boolean).join(' · ');
   return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">${flagHTML(c.cc,22)}</div>
     <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">${esc(sub)}</div></div></div>`;
@@ -2231,13 +2286,18 @@ function countryStatsData(period){
   const newBy = {}; for(const [cc,d] of Object.entries(first)) if(isCountry(cc)) (newBy[d.slice(0,4)] ??= []).push(cc);
   const conts = Object.keys(CONTINENTS).map(k=>{ const total=[...SOVEREIGN].filter(c=>CONT_OF[c]===k).length, got=countries.filter(c=>CONT_OF[c]===k);
     return {label:k, n:got.length, total, codes:got}; });
-  const top = countries.map(cc=>({cc, n:vm[cc].flights+vm[cc].trips+vm[cc].journeys, v:vm[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
+  // «где бывали чаще всего» — без времени, когда вы там жили
+  const cnt = {}, bump = (cc,k)=>{ const v = cnt[cc] ??= {flights:0, trips:0, journeys:0}; v[k]++; };
+  for(const a of arcs) for(const p of [a.a,a.b]) if(!homeAt(p.country, p.lat, p.lon, a.f.date)) bump(p.country,'flights');
+  for(const t of ts) for(const p of [t.from,t.to]){ const cc=(p.cc||'').toUpperCase(); if(cc && !homeAt(cc, +p.lat, +p.lon, t.date)) bump(cc,'trips'); }
+  for(const j of js) for(const cc of j.countries) if(!homeAt(cc, null, null, j.start)) bump(cc,'journeys');
+  const top = countries.filter(cc=>cnt[cc]).map(cc=>({cc, n:cnt[cc].flights+cnt[cc].trips+cnt[cc].journeys, v:cnt[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
   const days = j => Math.round((new Date(j.end+'T12:00') - new Date(j.start+'T12:00'))/864e5) + 1;
   const groups = {}; for(const t of ts){ (groups[t.group ?? t.id] ??= []).push(t); }
   const gl = Object.values(groups), gkm = g=>g.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
   const byMode = {}; for(const t of ts) byMode[t.mode]=(byMode[t.mode]||0)+(+t.km||dist(t.from,t.to));
   const jYears = {}; for(const j of journeys.filter(j=>j.start<=today)) jYears[j.start.slice(0,4)]=(jYears[j.start.slice(0,4)]||0)+1;
-  return { vm, countries, terr, cities:citiesFrom(arcs, ts), conts, top, first, newBy, period,
+  return { vm, countries, terr, cities:citiesFrom(arcs, ts).filter(c=>!c.home), conts, top, first, newBy, period,
     js, jDays: js.reduce((s,j)=>s+days(j),0), longest: js.reduce((b,j)=>!b||days(j)>days(b)?j:b, null), days,
     gl, gkm, groundKm: gl.reduce((s,g)=>s+gkm(g),0), byMode, jYears:Object.keys(jYears).sort().map(k=>({label:k,n:jYears[k]})) };
 }
@@ -2255,7 +2315,7 @@ function countryStatsHTML(D){
     + `<div class="gfoot" style="margin-top:6px">Посещено частей света: ${D.conts.filter(c=>c.n).length} из 6</div>`);
   if(D.top.length) h += card('Где бывали чаще всего','📍', D.top.slice(0,8).map(t=>{ const v=t.v;
       return hbar(countryName(t.cc), t.n, D.top[0].n, {lead:flagHTML(t.cc,18), color:'var(--green)', sub:[v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null].filter(Boolean).join(' ')}); }).join('')
-    + `<div class="gfoot">Считаются перелёты в страну и из неё, наземные участки и путешествия.</div>`);
+    + `<div class="gfoot">Считаются перелёты в страну и из неё, наземные участки и путешествия.${homes.length ? ' Время, когда вы там жили, не считается.' : ' Укажите в профиле, где живёте, — дом перестанет попадать в топ.'}</div>`);
   if(D.period==='all'){
     const ny = Object.keys(D.newBy).sort().map(k=>({label:k, n:D.newBy[k].length}));
     if(ny.length) h += card('Новые страны по годам','🆕', vbars(ny,{cls:'green'}));
@@ -2265,7 +2325,7 @@ function countryStatsHTML(D){
   }
   if(D.cities.length) h += card('Города','🏙', `<div style="font-size:22px;font-weight:700;margin-bottom:4px">${D.cities.length} ${plural(D.cities.length,'город','города','городов')}</div>`
     + D.cities.slice(0,8).map(c=>hbar(c.name, c.visits, D.cities[0].visits, {lead:flagHTML(c.cc,18), color:'#e11d48', sub:plural(c.visits,'визит','визита','визитов')})).join('')
-    + `<div class="gfoot">Визит — отдельная дата перелёта или поездки. Аэропорты рядом с городом считаются этим городом.</div>`);
+    + `<div class="gfoot">Визит — отдельная дата перелёта или поездки. Аэропорты рядом с городом считаются этим городом.${homes.length ? ' Город, где вы жили, в это время не считается.' : ''}</div>`);
   if(D.js.length){
     const L = D.longest;
     h += card('Путешествия','🧳', `<div class="big">${bigv(D.js.length,'путешествий')}${bigv(Math.round(D.jDays/D.js.length*10)/10,'дней в среднем')}</div>`
