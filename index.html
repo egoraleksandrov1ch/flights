@@ -51,7 +51,7 @@
   .tile small{display:block;font-size:9px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:2px;white-space:nowrap}
   .tiles:hover .tile{background:rgba(255,255,255,.09)}
   .list{flex:1;overflow-y:auto;min-height:0;padding:0 0 calc(24px + var(--safe-b));-webkit-overflow-scrolling:touch}
-  .sec{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:14px 18px 6px;position:sticky;top:0;z-index:1;background:linear-gradient(rgba(24,26,33,.96),rgba(24,26,33,.85))}
+  .sec{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:14px 18px 6px;position:sticky;top:0;z-index:1;background:rgb(24,26,33)}
   .sec.blue{color:var(--accent2)}
   .row{display:flex;gap:12px;padding:10px 18px;cursor:pointer;border-bottom:1px solid var(--line);align-items:flex-start;position:relative}
   .row:hover{background:rgba(255,255,255,.03)}
@@ -373,7 +373,9 @@ let flights  = loadJ('flights.v1', []);
 let trips    = loadJ('trips.v1', []);
 let journeys = loadJ('journeys.v1', []);
 let manual   = loadJ('countries.v1', []);
-let homes    = loadJ('homes.v1', []);   // где живу: [{id,name,cc,lat,lon,from,to}] — эти места не считаются путешествиями
+let homes    = loadJ('homes.v1', []);
+let mcities  = loadJ('cities.v1', []);  // города, отмеченные вручную: [{id,name,sub,cc,lat,lon,date}]
+function saveCities(){ saveJ('cities.v1', mcities); refresh(); }   // где живу: [{id,name,cc,lat,lon,from,to}] — эти места не считаются путешествиями
 function saveHomes(){ saveJ('homes.v1', homes); refresh(); }
 /** дом на дату: город (≤40 км от дома) или только страна; без даты — считаем «сегодня» */
 function homeAt(cc, lat, lon, date){
@@ -497,7 +499,14 @@ function collect(arcs, js, mn, ts){
 const doneTrip = t => !t.date || t.date <= todayStr();
 function visitedMap(){
   const t=todayStr();
-  return collect(doneArcs(), journeys.filter(j=>j.start<=t), manual, trips.filter(doneTrip));
+  const m = collect(doneArcs(), journeys.filter(j=>j.start<=t), manual, trips.filter(doneTrip));
+  for(const c of mcities){
+    for(const cc of [c.cc, regionOf(c.lon, c.lat, c.cc)].filter(Boolean)){
+      const v = m[cc] ??= {cc, flights:0, journeys:0, trips:0, manual:false, last:'', pts:[]};
+      v.cities = (v.cities||0) + 1; v.pts.push([c.lon, c.lat]); if(c.date && c.date>v.last) v.last=c.date;
+    }
+  }
+  return m;
 }
 /** части стран для закраски: основная + где были; острова-регионы — целиком */
 function fillsGeo(map){
@@ -901,7 +910,7 @@ function tripRow(legs){
     <button class="more" aria-label="Ещё">${ICON.dots}</button></div>`;
 }
 function countryRow(v){
-  const parts = [v.flights?`✈ ${v.flights}`:null, v.trips?`наземных поездок: ${v.trips}`:null, v.journeys?`путешествий: ${v.journeys}`:null, v.manual?'отмечено вручную':null].filter(Boolean);
+  const parts = [v.flights?`✈ ${v.flights}`:null, v.trips?`наземных поездок: ${v.trips}`:null, v.journeys?`путешествий: ${v.journeys}`:null, v.cities?`городов вручную: ${v.cities}`:null, v.manual?'отмечено вручную':null].filter(Boolean);
   return `<div class="row${selCountry===v.cc?' on green':''}" data-c="${v.cc}" style="align-items:center">
     <div class="lead">${flagHTML(v.cc,28)}</div>
     <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(countryName(v.cc))}</div><div class="sub">${parts.join(' · ')}</div></div>
@@ -929,7 +938,12 @@ function renderCountry(){
     if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
   }
   list.innerHTML = h;
-  list.querySelectorAll('[data-city]').forEach(el=>{ el.onclick = ()=>{ const c=currentCities().find(x=>x.key===el.dataset.city);
+  list.querySelectorAll('[data-city]').forEach(el=>{
+    const cm = currentCities().find(x=>x.key===el.dataset.city);
+    const menu = ()=> cm?.manual ? [{label:'Снять отметку', danger:true, act:()=>{ const ids=new Set(cm.manual); mcities=mcities.filter(x=>!ids.has(x.id)); saveCities(); }}] : [];
+    if(cm?.manual) bindContext(el, menu);
+    el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), menu()); return; }
+    const c = cm;
     if(c && mapReady){ setDetent('low'); setTimeout(()=>map.easeTo({center:[c.lon,c.lat], zoom:7, padding:insets(), duration:900}), 80); } }; });
   list.querySelectorAll('[data-j]').forEach(el=>{
     const j = journeys.find(x=>x.id===Number(el.dataset.j));
@@ -960,6 +974,7 @@ $('#countryShare').onclick = ()=>ShareModal.open('country');
 $('#addCountry').onclick = e=>popMenu(e.currentTarget, [
   {label:'🏳  Отметить страны', act:()=>openManualPicker()},
   {label:'🧳  Новое путешествие', act:()=>openJourneyForm(null)},
+  {label:'📍  Отметить город', act:()=>openCityForm()},
   {label:'🚌  Наземная поездка', act:()=>openTripForm(null)},
 ]);
 $('#profileBtn').onclick = ()=>openProfile();
@@ -1384,7 +1399,7 @@ function openProfile(){
     <div class="gfoot">Пока вы живёте в городе, он не считается путешествием: не попадает в топ городов и стран. Перелёты и поездки отсюда остаются.</div>
     <div class="ghead">Данные</div>
     <div class="grp"><button class="gi link" id="pfImp">⬇︎ Импорт из файла</button><button class="gi link" id="pfExp">⬆︎ Экспорт (сохранить копию)</button></div>
-    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны, места жительства и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
+    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны и города, места жительства и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
     <div class="grp" style="margin-top:18px"><button class="gi danger" id="pfClr">Удалить все данные</button></div>
     <input type="file" id="pfFile" accept=".json,application/json" hidden>`;
   const q = x=>m.body.querySelector(x), key=q('#pfKey');
@@ -1409,7 +1424,27 @@ function openProfile(){
                                       {label:'Добавить к текущим', bold:true, act:()=>{ applyImport(r,false); m.close(); toast('Данные добавлены'); }}]});
   };
   q('#pfClr').onclick = ()=>confirmDialog('Удалить все перелёты, путешествия и отметки?','Удалить всё',()=>{ flights=[]; journeys=[]; manual=[]; trips=[]; selected=selJourney=selCountry=null;
-    saveJ('flights.v1',[]); saveJ('journeys.v1',[]); saveJ('countries.v1',[]); saveJ('trips.v1',[]); m.close(); refresh(); }, 'Совет: сначала сделайте экспорт.');
+    saveJ('flights.v1',[]); saveJ('journeys.v1',[]); saveJ('countries.v1',[]); saveJ('trips.v1',[]); mcities=[]; saveJ('cities.v1',[]); m.close(); refresh(); }, 'Совет: сначала сделайте экспорт.');
+}
+function openCityForm(){
+  const s = { place:null, hasDate:false, date:todayStr() };
+  const m = openModal({title:'Отметить город', right:'Добавить', onRight: save});
+  m.body.innerHTML = `<div class="grp"><button class="gi" id="cfP"></button></div>
+    <div class="grp"><div class="gi"><span>Дата визита</span><span class="toggle" id="cfT"></span></div><div class="gi" id="cfR"><span class="lbl">Дата</span><input type="date" id="cfD" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="gfoot">Для городов, куда вы попали не самолётом и не записанной поездкой. Страна города тоже отметится посещённой.</div>`;
+  const q = x=>m.body.querySelector(x); q('#cfD').value = s.date;
+  function paint(){
+    q('#cfP').innerHTML = s.place ? `<span style="min-width:0"><div>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</div><div style="font-size:12px;color:var(--muted)">${esc(s.place.sub||'')}</div></span>` : '<span style="color:var(--muted)">Выбрать город</span>';
+    q('#cfT').classList.toggle('on', s.hasDate); q('#cfR').hidden = !s.hasDate; m.setRight(!!s.place);
+  }
+  q('#cfP').onclick = ()=>pickPlace(p=>{ s.place=p; paint(); });
+  q('#cfT').parentElement.onclick = ()=>{ s.hasDate=!s.hasDate; paint(); };
+  q('#cfD').onchange = e=>{ s.date = e.target.value || todayStr(); };
+  function save(){
+    mcities.push({ id:Date.now(), name:s.place.name, sub:s.place.sub||'', cc:s.place.cc, lat:s.place.lat, lon:s.place.lon, date: s.hasDate ? s.date : '' });
+    m.close(); layer='cities'; lsSet('map.layer', layer); setPage(1); saveCities();
+  }
+  paint(); setTimeout(()=>q('#cfP').click(), 50);
 }
 function openHomeForm(editing, done){
   const s = { place: editing ? {name:editing.name, cc:editing.cc, lat:editing.lat, lon:editing.lon, sub:editing.sub||''} : null,
@@ -1447,7 +1482,8 @@ function parseImport(obj){
   const mn = (obj?.countries||[]).filter(x=>typeof x==='string');
   const apiKey = String(obj?.settings?.aerodataboxKey || '').trim();
   const hm = (obj?.homes||[]).filter(h=>h && h.cc && h.lat!=null);
-  return { flights:fl, journeys:js, trips:ts, manual:mn, apiKey, homes:hm };
+  const mc = (obj?.cities||[]).filter(c=>c && c.cc && c.lat!=null && c.name).map(c=>({...c, id:num(c.id)}));
+  return { flights:fl, journeys:js, trips:ts, manual:mn, apiKey, homes:hm, cities:mc };
 }
 function mergeFlights(cur, inc){
   // тот же перелёт (маршрут + дата) не дублируем, а дополняем пустые поля: самолёт, борт, время…
@@ -1462,6 +1498,7 @@ function mergeFlights(cur, inc){
 }
 function applyImport(r, replace){
   if(r.apiKey && !API.hasKey) lsSet(API.keyName, r.apiKey);   // ключ из бэкапа, если здесь его ещё нет
+  if(r.cities?.length){ const ids=new Set(mcities.map(c=>c.id)); mcities = replace ? r.cities : mcities.concat(r.cities.filter(c=>!ids.has(c.id))); saveJ('cities.v1', mcities); }
   if(r.homes?.length){ const ids=new Set(homes.map(h=>h.id)); homes = replace ? r.homes : homes.concat(r.homes.filter(h=>!ids.has(h.id))); saveJ('homes.v1', homes); }
   if(replace){ flights=r.flights; journeys=r.journeys; trips=r.trips; manual=r.manual; selected=selJourney=selCountry=null; }
   else {
@@ -1471,7 +1508,7 @@ function applyImport(r, replace){
   saveJ('flights.v1',flights); saveJ('journeys.v1',journeys); saveJ('trips.v1',trips); saveJ('countries.v1',manual); refresh();
 }
 function exportData(){
-  const out = { version:3, flights, journeys, trips, countries:manual, homes };
+  const out = { version:3, flights, journeys, trips, countries:manual, homes, cities:mcities };
   if(API.hasKey) out.settings = { aerodataboxKey: API.key };   // ключ — чтобы не вводить заново
   const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`flights-${todayStr()}.json`; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -2231,8 +2268,8 @@ const ShareModal = (()=>{
 //  Города, части света, статистика путешествий и стран
 // =====================================================================
 /** города из перелётов (город аэропорта) и наземных поездок; близкие точки (≤40 км) — один город */
-function citiesFrom(arcs, ts){
-  const pts = [];
+function citiesFrom(arcs, ts, extra=[]){
+  const pts = extra.map(c=>({name:c.name, cc:c.cc, lat:+c.lat, lon:+c.lon, date:c.date||'', air:false, manual:c.id}));
   for(const a of arcs) for(const p of [a.a,a.b]) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:p.country, lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
   for(const t of ts) for(const p of [t.from,t.to]) if(p && p.lat!=null) pts.push({name:p.name, cc:(p.cc||'').toUpperCase(), lat:+p.lat, lon:+p.lon, date:t.date||'', air:false});
   const cl = [], norm = s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zа-я0-9]/g,'');
@@ -2241,26 +2278,27 @@ function citiesFrom(arcs, ts){
     let c = cl.find(c=>c.cc===p.cc && (norm(c.names[0][0])===norm(p.name) || dist(c,p) < 40));
     if(!c){ c = {cc:p.cc, lat:p.lat, lon:p.lon, names:[], dates:new Set(), air:0, ground:0}; cl.push(c); }
     const nm = c.names.find(x=>x[0]===p.name); nm ? nm[1]++ : c.names.push([p.name,1]);
+    if(p.manual){ (c.manual ??= []).push(p.manual); }
     if(homeAt(p.cc, p.lat, p.lon, p.date)==='city'){ c.home = true; continue; }   // жизнь дома — не визит
     if(p.date) c.dates.add(p.date); p.air ? c.air++ : c.ground++;
   }
   for(const h of homes){ const c = cl.find(c=>c.cc===h.cc && dist(c,h) < 40); if(c) c.home = true; }
   return cl.map(c=>{ const name = [...c.names].sort((a,b)=>b[1]-a[1])[0][0];
     return { key:c.cc+':'+name, name, cc:c.cc, lat:c.lat, lon:c.lon, visits:c.home ? c.dates.size : Math.max(1,c.dates.size), air:c.air, ground:c.ground,
-      home:!!c.home, last:[...c.dates].sort().pop()||'' }; })
+      home:!!c.home, manual:c.manual||null, last:[...c.dates].sort().pop()||'' }; })
     .sort((a,b)=>(a.home-b.home) || b.visits-a.visits || a.name.localeCompare(b.name));
 }
 function currentCities(){
   const j = journeys.find(x=>x.id===selJourney);
   if(j) return citiesFrom(journeyArcs(j).filter(a=>!a.up), journeyTrips(j));
-  return citiesFrom(doneArcs(), trips.filter(doneTrip));
+  return citiesFrom(doneArcs(), trips.filter(doneTrip), mcities);
 }
 function cityRow(c){
   if(c.home) return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">🏠</div>
     <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">дом${c.visits?` · поездок сюда, когда жили не здесь: ${c.visits}`:''}</div></div></div>`;
-  const sub = [c.visits>1 ? `${c.visits} ${plural(c.visits,'визит','визита','визитов')}` : null, c.air?'✈':null, c.ground?'🚌':null, c.last?dateShort(c.last):null].filter(Boolean).join(' · ');
+  const sub = [c.visits>1 ? `${c.visits} ${plural(c.visits,'визит','визита','визитов')}` : null, c.manual?'отмечено вручную':null, c.air?'✈':null, (c.ground-(c.manual?.length||0))>0?'🚌':null, c.last?dateShort(c.last):null].filter(Boolean).join(' · ');
   return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">${flagHTML(c.cc,22)}</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">${esc(sub)}</div></div></div>`;
+    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">${esc(sub)}</div></div>${c.manual?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
 }
 
 const CONTINENTS = {
@@ -2276,7 +2314,7 @@ const CONT_OF = {}; for(const [k,v] of Object.entries(CONTINENTS)) for(const cc 
 function countryStatsData(period){
   const today = todayStr(), all = period==='all', inP = d => all || (d||'').startsWith(period);
   const arcs = doneArcs().filter(a=>inP(a.f.date)), ts = trips.filter(t=>doneTrip(t) && inP(t.date)), js = journeys.filter(j=>j.start<=today && (all || j.start.startsWith(period) || j.end.startsWith(period)));
-  const vm = all ? visitedMap() : collect(arcs, js, [], ts);
+  const vm = all ? visitedMap() : collect(arcs, js, [], ts);   // ручные города без даты — только во «Всё время»
   const codes = Object.keys(vm), countries = codes.filter(isCountry), terr = codes.filter(c=>!isCountry(c));
   // когда страна появилась впервые (по всем данным)
   const first = {}, seen = (cc, d)=>{ if(cc && d && (!first[cc] || d<first[cc])) first[cc]=d; };
@@ -2297,7 +2335,7 @@ function countryStatsData(period){
   const gl = Object.values(groups), gkm = g=>g.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
   const byMode = {}; for(const t of ts) byMode[t.mode]=(byMode[t.mode]||0)+(+t.km||dist(t.from,t.to));
   const jYears = {}; for(const j of journeys.filter(j=>j.start<=today)) jYears[j.start.slice(0,4)]=(jYears[j.start.slice(0,4)]||0)+1;
-  return { vm, countries, terr, cities:citiesFrom(arcs, ts).filter(c=>!c.home), conts, top, first, newBy, period,
+  return { vm, countries, terr, cities:citiesFrom(arcs, ts, all ? mcities : mcities.filter(c=>inP(c.date))).filter(c=>!c.home), conts, top, first, newBy, period,
     js, jDays: js.reduce((s,j)=>s+days(j),0), longest: js.reduce((b,j)=>!b||days(j)>days(b)?j:b, null), days,
     gl, gkm, groundKm: gl.reduce((s,g)=>s+gkm(g),0), byMode, jYears:Object.keys(jYears).sort().map(k=>({label:k,n:jYears[k]})) };
 }
