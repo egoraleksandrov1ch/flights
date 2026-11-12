@@ -216,7 +216,10 @@
   .maplibregl-popup-tip{border-top-color:#1c1d22!important;border-bottom-color:#1c1d22!important}
   @media (hover:none){ .row .more{display:none} }
   .mbox.dlg{max-width:400px}
-  .prog.lap{height:10px}
+  .prog.lap{height:12px;border-radius:6px;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}
+  .prog.lap.full{background:linear-gradient(180deg, rgba(255,255,255,.22), rgba(0,0,0,.08)), var(--c)}
+  .prog.lap i{border-radius:6px;background:linear-gradient(180deg, rgba(255,255,255,.25), rgba(0,0,0,.12)), var(--c);
+    box-shadow:0 1px 3px rgba(0,0,0,.45), 3px 0 6px rgba(0,0,0,.35)}
   .sub-t{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
   .lchart .plot{position:relative;height:120px;margin:14px 0 6px}
   .lchart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
@@ -1527,7 +1530,7 @@ const card = (title, ico, body) => `<div class="card"><h3><span style="opacity:.
 const bigv = (v,l) => `<div><b>${v}</b><small>${l}</small></div>`;
 function hbar(label, n, max, {sub='', color='var(--accent)', lead=''}={}){
   return `<div class="hbar"><div class="hl">${lead}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(label)}</span><span class="n" style="display:flex;gap:8px;align-items:baseline">${sub?`<span class="s">${esc(sub)}</span>`:''}${n}</span></div>
-    <div class="tr"><i style="width:${Math.max(3, n/Math.max(max,1)*100)}%;background:${color}"></i></div></div>`;
+    <div class="tr"><i style="width:${n>0 ? Math.max(2.5, n/Math.max(max,1)*100) : 0}%;background:${color}"></i></div></div>`;
 }
 function vbars(items, {cls='', labels=true, hi=null, every=1}={}){
   const max=Math.max(1,...items.map(x=>x.n));
@@ -1536,11 +1539,10 @@ function vbars(items, {cls='', labels=true, hi=null, every=1}={}){
 /** полоса «кругов»: пройденные круги — залито целиком, текущий круг — темнее поверх */
 function lapBar(x, tone){
   const laps = Math.floor(x), frac = x - laps;
-  const base = tone==='blue' ? 'var(--accent2)' : 'var(--accent)', dark = tone==='blue' ? '#1f6f93' : '#9a5a12';
-  const what = tone==='blue' ? 'круг' : 'путь';
-  if(laps < 1) return `<div class="prog lap"><i style="width:${frac*100}%;background:${base}"></i></div>`;
-  return `<div class="prog lap" style="background:${base}"><i style="width:${frac*100}%;background:${dark}"></i></div>
-    <div class="gfoot" style="margin:-4px 0 6px">${laps} ${what==='круг'?plural(laps,'полный круг','полных круга','полных кругов'):plural(laps,'полный путь','полных пути','полных путей')} · идёт ${laps+1}-й: ${Math.round(frac*100)}%</div>`;
+  const base = tone==='blue' ? 'var(--accent2)' : 'var(--accent)', dark = tone==='blue' ? '#1d6a8c' : '#9a5a12';
+  if(laps < 1) return `<div class="prog lap"><i style="width:${frac*100}%;--c:${base}"></i></div>`;
+  // пройденные круги — полоса залита целиком; текущий круг — темнее поверх, со скруглением и тенью
+  return `<div class="prog lap full" style="--c:${base}"><i style="width:${frac*100}%;--c:${dark}"></i></div>`;
 }
 /** линия по годам: точки стоят ровно под столбиками, растягивается на всю ширину */
 function lineChart(items){
@@ -2248,7 +2250,7 @@ function countryStatsHTML(D){
     ${bigv(D.cities.length, plural(D.cities.length,'город','города','городов'))}${bigv(D.terr.length,'территорий и островов')}
     ${bigv(D.js.length, plural(D.js.length,'путешествие','путешествия','путешествий'))}${bigv(D.jDays, plural(D.jDays,'день','дня','дней')+' в путешествиях')}
     ${bigv(D.gl.length,'наземных поездок')}${bigv(kmShort(D.groundKm),'км по земле')}</div>
-    <div class="gfoot" style="margin-top:12px">Мир: ${nC} из 195</div><div class="prog lap"><i style="width:${nC/195*100}%;background:var(--green)"></i></div>`);
+    <div class="gfoot" style="margin-top:12px">Мир: ${nC} из 195</div><div class="prog lap"><i style="width:${nC/195*100}%;--c:var(--green)"></i></div>`);
   h += card('Части света','🧭', D.conts.map(c=>hbar(c.label, c.n, c.total, {sub:`из ${c.total}`, color:'var(--green)'})).join('')
     + `<div class="gfoot" style="margin-top:6px">Посещено частей света: ${D.conts.filter(c=>c.n).length} из 6</div>`);
   if(D.top.length) h += card('Где бывали чаще всего','📍', D.top.slice(0,8).map(t=>{ const v=t.v;
