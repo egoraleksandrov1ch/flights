@@ -559,8 +559,7 @@ const EMPTY_FC = {type:'FeatureCollection', features:[]};
 
 // ---------- глобус: карта OpenFreeMap (Liberty), как раньше на сайте ----------
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-// линии: белые со свечением (мягкий голубой ореол под белой нитью)
-const C = { web:'#ffffff', glow:'#5ad1ff', sel:'#ffffff', selGlow:'#1fb6ff', up:'#ffffff', upSel:'#ffffff', dot:'#ff5a1f', halo:'#ffffff', text:'#1b1f2a', fill:'#22c55e' };
+const C = { line:'#ff5a1f', line2:'#1f7aff', sel:'#d10068', up:'#7d8696', upSel:'#4b5363', dot:'#ff5a1f', halo:'#ffffff', text:'#1b1f2a', fill:'#22c55e' };
 
 function initMap(){
   map = new maplibregl.Map({
@@ -608,22 +607,15 @@ function addLayers(){
   map.addLayer({id:'country-fill',type:'fill',source:'countries',paint:{'fill-color':C.fill,'fill-opacity':0.42}});
   map.addLayer({id:'country-line',type:'line',source:'countries',paint:{'line-color':'#16a34a','line-width':1,'line-opacity':0.8}});
   // градиент вдоль дуги: оранжевый у вылета → голубой у прилёта
-  map.addLayer({id:'flights-case',type:'line',source:'flights',layout:round,
-    paint:{'line-width':['interpolate',['linear'],['zoom'],0,6,5,9],'line-color':C.glow,'line-blur':['interpolate',['linear'],['zoom'],0,4,5,6],'line-opacity':0.55}});
   map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,filter:['!',['get','up']],
-    paint:{'line-width':['interpolate',['linear'],['zoom'],0,1.6,5,2.2],'line-color':C.web,'line-opacity':1}});
+    paint:{'line-width':2,'line-opacity':0.85,'line-gradient':['interpolate',['linear'],['line-progress'],0,C.line,1,C.line2]}});
   map.addLayer({id:'flights-up',type:'line',source:'flights',layout:{'line-join':'round'},filter:['get','up'],
-    paint:{'line-width':['interpolate',['linear'],['zoom'],0,1.6,5,2.2],'line-color':C.up,'line-opacity':1,'line-dasharray':[2.5,2]}});
-  map.addLayer({id:'flights-sel-case',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
-    paint:{'line-width':14,'line-color':C.selGlow,'line-blur':8,'line-opacity':0.85}});
+    paint:{'line-width':1.8,'line-color':C.up,'line-opacity':0.85,'line-dasharray':[2,2]}});
   map.addLayer({id:'flights-sel',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
-    paint:{'line-width':3.4,'line-color':C.sel}});
+    paint:{'line-width':3.2,'line-color':C.sel}});
   map.addLayer({id:'flights-hit',type:'line',source:'flights',paint:{'line-width':16,'line-opacity':0}});
-  // точки аэропортов — в стиле линий: белые с голубым свечением
-  map.addLayer({id:'airports-glow',type:'circle',source:'airports',
-    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,6,4,8,8,11],'circle-color':C.glow,'circle-blur':1,'circle-opacity':0.6}});
   map.addLayer({id:'airports',type:'circle',source:'airports',
-    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.6,4,3.6,8,5],'circle-color':'#ffffff','circle-stroke-width':1.4,'circle-stroke-color':'#1fb6ff'}});
+    paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.6,4,4,8,6],'circle-color':C.dot,'circle-stroke-width':1.5,'circle-stroke-color':C.halo}});
   map.addLayer({id:'airport-labels',type:'symbol',source:'airports',minzoom:2.5,
     layout:{'text-field':['get','iata'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1.1],'text-anchor':'top'},
     paint:{'text-color':C.text,'text-halo-color':C.halo,'text-halo-width':1.4}});
@@ -672,11 +664,9 @@ function updateMap(force){
   }
   const hasSel = page===0 && selected!=null;
   map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
-  map.setFilter('flights-sel-case', ['==',['get','id'], hasSel ? selected : -1]);
-  map.setPaintProperty('flights-case','line-opacity', hasSel ? 0.15 : 0.55);
   map.setPaintProperty('flights-sel','line-color', ['case',['get','up'], C.upSel, C.sel]);
-  map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.45 : 1);
-  map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.45 : 1);
+  map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.22 : 0.85);
+  map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.3 : 0.85);
   map.setPaintProperty('country-fill','fill-opacity', selCountry ? ['case',['==',['get','iso'],selCountry],0.65,0.28] : 0.42);
 }
 
