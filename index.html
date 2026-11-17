@@ -379,7 +379,10 @@ const yearOf = f => f.date ? f.date.slice(0,4) : 'none';
 
 // ---------- страны, территории, острова ----------
 const SOVEREIGN = new Set(`AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF BI CV KH CM CA CF TD CL CN CO KM CG CD CR CI HR CU CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FJ FI FR GA GM GE DE GH GR GD GT GN GW GY HT HN HU IS IN ID IR IQ IE IL IT JM JP JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MG MW MY MV ML MT MH MR MU MX FM MD MC MN ME MA MZ MM NA NR NP NL NZ NI NE NG MK NO OM PK PW PA PG PY PE PH PL PT QA RO RU RW KN LC VC WS SM ST SA SN RS SC SL SG SK SI SB SO ZA SS ES LK SD SR SE CH SY TJ TZ TH TL TG TO TT TN TR TM TV UG UA AE GB US UY UZ VU VE VN YE ZM ZW VA PS XK TW`.split(/\s+/));
-const REGIONS = { 'ES-CN':['Канарские острова','ES'], 'ES-IB':['Балеарские острова','ES'], 'PT-30':['Мадейра','PT'], 'PT-20':['Азорские острова','PT'] };
+const REGIONS = { 'ES-CN':['Канарские острова','ES'], 'ES-IB':['Балеарские острова','ES'], 'PT-30':['Мадейра','PT'], 'PT-20':['Азорские острова','PT'],
+  // спорная территория: закрашивается отдельно и не засчитывается ни одной стране
+  'XC':['Крым',''] };
+const isDisputed = cc => REGIONS[cc]?.[1] === '';
 const isCountry = cc => SOVEREIGN.has(cc);
 const isRegion = cc => !!REGIONS[cc];
 const countryName = (()=>{ let dn=null; try{ dn=new Intl.DisplayNames(['ru'],{type:'region'}); }catch(e){} const cache={};
@@ -392,6 +395,8 @@ function drawRegionFlag(ctx, cc, x, y, w, h){
   else if(cc==='PT-30'){ f('#0033A0',x,y,w,h); f('#FFD100',x+w/4,y,w/2,h); const cx=x+w/2, cy=y+h/2, s=h*.36, t=s*.36;
     f('#D52B1E',cx-t/2,cy-s/2,t,s); f('#D52B1E',cx-s/2,cy-t/2,s,t); f('#fff',cx-t/6,cy-s/2.6,t/3,s/1.3); f('#fff',cx-s/2.6,cy-t/6,s/1.3,t/3); }
   else if(cc==='PT-20'){ f('#fff',x,y,w,h); f('#0F47AF',x,y,w*.4,h); ctx.fillStyle='#C9A227'; ctx.beginPath(); ctx.arc(x+w*.4,y+h/2,h*.14,0,7); ctx.fill(); }
+  else if(cc==='XC'){ f('#c9ced8',x,y,w,h); ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip(); ctx.strokeStyle='#8a93a8'; ctx.lineWidth=Math.max(1,h*.09);
+    for(let k=-h; k<w+h; k+=h*.32){ ctx.beginPath(); ctx.moveTo(x+k,y+h); ctx.lineTo(x+k+h,y); ctx.stroke(); } ctx.restore(); }
   else { f('#FCDD09',x,y,w,h); const hh=h/9; for(let i=1;i<9;i+=2) f('#DA121A',x,y+i*hh,w,hh); f('#5E2C79',x,y,w*.4,hh*5); f('#fff',x+w*.14,y+hh*1.6,w*.12,hh*1.8); }
 }
 const rflagCache = {};
@@ -464,6 +469,21 @@ function regionOf(lon, lat, parent){
   }
   return null;
 }
+/** спорная территория, в которой лежит точка (по контуру; аэропорт на берегу — с допуском ~0.15°) */
+function disputedAt(lon, lat){
+  for(const code of Object.keys(REGIONS)){
+    if(!isDisputed(code)) continue; const b=REGION_BOX[code], ps=PARTS[code];
+    if(!b || !ps || lon<b[0] || lon>b[2] || lat<b[1] || lat>b[3]) continue;
+    for(const p of ps){ const r=p.rings[0]; if(inRing(lon,lat,r) || r.some(([x,y])=>(x-lon)**2+(y-lat)**2 < 0.0225)) return code; }
+  }
+  return null;
+}
+/** коды для точки: спорная территория — только она; иначе страна (+ остров-регион) */
+function placeCodes(cc, lon, lat){
+  const d = lon!=null ? disputedAt(lon, lat) : null; if(d) return [d];
+  const r = lon!=null ? regionOf(lon, lat, cc) : null;
+  return [cc, r].filter(Boolean);
+}
 function inRing(x,y,r){ let ins=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const [xi,yi]=r[i],[xj,yj]=r[j]; if(((yi>y)!==(yj>y)) && (x<(xj-xi)*(y-yi)/(yj-yi)+xi)) ins=!ins; } return ins; }
 function partIndex(cc, lon, lat){
   const ps=PARTS[cc]; if(!ps) return -1;
@@ -523,14 +543,11 @@ function collect(arcs, js, mn, ts){
     if(kind==='f') v.flights++; if(kind==='t') v.trips++;
     if(lon!=null) v.pts.push([lon,lat]); if(date && date>v.last) v.last=date;
   };
-  for(const a of arcs) for(const p of [a.a, a.b]){
-    touch(p.country, p.lon, p.lat, a.f.date, 'f');
-    const r=regionOf(p.lon,p.lat,p.country); if(r) touch(r, p.lon, p.lat, a.f.date, 'f');
-  }
+  for(const a of arcs) for(const p of [a.a, a.b])
+    for(const cc of placeCodes(p.country, p.lon, p.lat)) touch(cc, p.lon, p.lat, a.f.date, 'f');
   for(const t of (ts||[])) for(const p of [t.from, t.to]){
     const cc=(p.cc||'').toUpperCase(); if(!cc) continue;
-    touch(cc, p.lon, p.lat, t.date, 't');
-    const r=regionOf(p.lon,p.lat,cc); if(r) touch(r, p.lon, p.lat, t.date, 't');
+    for(const c of placeCodes(cc, +p.lon, +p.lat)) touch(c, +p.lon, +p.lat, t.date, 't');
   }
   for(const j of js) for(const cc of j.countries){ const v = map[cc] ??= {cc, flights:0, journeys:0, trips:0, manual:false, last:'', pts:[]}; v.journeys++; if(j.end>v.last) v.last=j.end; }
   for(const cc of mn){ (map[cc] ??= {cc, flights:0, journeys:0, trips:0, manual:false, last:'', pts:[]}).manual = true; }
@@ -541,7 +558,7 @@ function visitedMap(){
   const t=todayStr();
   const m = collect(doneArcs(), journeys.filter(j=>j.start<=t), manual, trips.filter(doneTrip));
   for(const c of mcities){
-    for(const cc of [c.cc, regionOf(c.lon, c.lat, c.cc)].filter(Boolean)){
+    for(const cc of placeCodes(c.cc, +c.lon, +c.lat)){
       const v = m[cc] ??= {cc, flights:0, journeys:0, trips:0, manual:false, last:'', pts:[]};
       v.cities = (v.cities||0) + 1; v.pts.push([c.lon, c.lat]); if(c.date && c.date>v.last) v.last=c.date;
     }
@@ -576,7 +593,7 @@ function tripGroups(){
     .sort((a,b)=>(b[0].date||'').localeCompare(a[0].date||''));
 }
 const legsTitle = legs => [legs[0].from.name, ...legs.map(l=>l.to.name)].join(' → ');
-const legsCountries = legs => [...new Set(legs.flatMap(l=>[l.from.cc,l.to.cc]).filter(Boolean).map(c=>c.toUpperCase()))];
+const legsCountries = legs => [...new Set(legs.flatMap(l=>[l.from,l.to]).filter(p=>p.cc).map(p=>disputedAt(+p.lon,+p.lat) || p.cc.toUpperCase()))];
 </script>
 
 <script>
@@ -953,7 +970,7 @@ function tripRow(legs){
     <button class="more" aria-label="Ещё">${ICON.dots}</button></div>`;
 }
 function countryRow(v){
-  const parts = [v.flights?`✈ ${v.flights}`:null, v.trips?`наземных поездок: ${v.trips}`:null, v.journeys?`путешествий: ${v.journeys}`:null, v.cities?`городов вручную: ${v.cities}`:null, v.manual?'отмечено вручную':null].filter(Boolean);
+  const parts = [v.flights?`✈ ${v.flights}`:null, v.trips?`наземных поездок: ${v.trips}`:null, v.journeys?`путешествий: ${v.journeys}`:null, v.cities?`городов вручную: ${v.cities}`:null, v.manual?'отмечено вручную':null, isDisputed(v.cc)?'спорная территория':null].filter(Boolean);
   return `<div class="row${selCountry===v.cc?' on green':''}" data-c="${v.cc}" style="align-items:center">
     <div class="lead">${flagHTML(v.cc,28)}</div>
     <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(countryName(v.cc))}</div><div class="sub">${parts.join(' · ')}</div></div>
@@ -1290,7 +1307,7 @@ function countryPicker({title, selection, auto=new Set(), note=null, left='На�
   m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="Франция, Мадейра…" autocomplete="off"></div><div id="cpList"></div>`;
   const inp = m.body.querySelector('input'), box = m.body.querySelector('#cpList');
   const row = cc=>{ const isAuto=auto.has(cc), on=isAuto||selection.has(cc);
-    return `<button class="gi" data-cc="${cc}"><span style="width:34px;text-align:center">${flagHTML(cc,24)}</span><span style="min-width:0"><div>${esc(countryName(cc))}</div>${isAuto?'<div style="font-size:11px;color:var(--muted)">из перелётов и путешествий</div>':''}</span>${on?`<span class="check${isAuto?' auto':''}">✓</span>`:''}</button>`; };
+    return `<button class="gi" data-cc="${cc}"><span style="width:34px;text-align:center">${flagHTML(cc,24)}</span><span style="min-width:0"><div>${esc(countryName(cc))}</div>${isAuto?'<div style="font-size:11px;color:var(--muted)">из перелётов и путешествий</div>':''}${isDisputed(cc)?'<div style="font-size:11px;color:var(--muted)">спорная территория — не засчитывается ни одной стране</div>':''}</span>${on?`<span class="check${isAuto?' auto':''}">✓</span>`:''}</button>`; };
   function paint(){
     const qv = inp.value.trim().toLowerCase(), match = l=> qv ? l.filter(cc=>countryName(cc).toLowerCase().includes(qv) || cc.toLowerCase()===qv) : l;
     const chosen = [...new Set([...selection, ...auto])].sort((a,b)=>countryName(a).localeCompare(countryName(b),'ru'));
@@ -2311,9 +2328,10 @@ const ShareModal = (()=>{
 // =====================================================================
 /** города из перелётов (город аэропорта) и наземных поездок; близкие точки (≤40 км) — один город */
 function citiesFrom(arcs, ts, extra=[]){
-  const pts = extra.map(c=>({name:c.name, cc:c.cc, lat:+c.lat, lon:+c.lon, date:c.date||'', air:false, manual:c.id}));
-  for(const a of arcs) for(const p of [a.a,a.b]) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:p.country, lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
-  for(const t of ts) for(const p of [t.from,t.to]) if(p && p.lat!=null) pts.push({name:p.name, cc:(p.cc||'').toUpperCase(), lat:+p.lat, lon:+p.lon, date:t.date||'', air:false});
+  const ccAt = (cc, lon, lat) => disputedAt(lon, lat) || cc;
+  const pts = extra.map(c=>({name:c.name, cc:ccAt(c.cc, +c.lon, +c.lat), lat:+c.lat, lon:+c.lon, date:c.date||'', air:false, manual:c.id}));
+  for(const a of arcs) for(const p of [a.a,a.b]) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:ccAt(p.country, p.lon, p.lat), lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
+  for(const t of ts) for(const p of [t.from,t.to]) if(p && p.lat!=null) pts.push({name:p.name, cc:ccAt((p.cc||'').toUpperCase(), +p.lon, +p.lat), lat:+p.lat, lon:+p.lon, date:t.date||'', air:false});
   const cl = [], norm = s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zа-я0-9]/g,'');
   // сначала наземные (точный центр города), потом аэропорты
   for(const p of [...pts.filter(x=>!x.air), ...pts.filter(x=>x.air)]){
@@ -2418,7 +2436,7 @@ function countryStatsHTML(D){
       + Object.keys(MODES).filter(k=>D.byMode[k]).map(k=>hbar(MODES[k].name, Math.round(D.byMode[k]), mx, {lead:MODES[k].ico, color:'var(--accent2)', sub:'км'})).join('')
       + (long ? `<div class="gfoot" style="margin-top:8px">Самая длинная: ${esc(legsTitle(long))} — ${fmtKm(D.gkm(long))} км</div>` : ''));
   }
-  if(D.terr.length) h += card('Территории и острова','🏝', `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${D.terr.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}</span>`).join('')}</div>`);
+  if(D.terr.length) h += card('Территории и острова','🏝', `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${D.terr.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}${isDisputed(cc)?' <small style="color:var(--muted)">· спорная</small>':''}</span>`).join('')}</div>`);
   return h;
 }
 function openCountryStats(initial='all'){
