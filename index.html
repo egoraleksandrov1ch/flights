@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,6 +9,7 @@
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
+<script data-goatcounter="https://yahor.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Diary Travel">
@@ -320,8 +321,11 @@
 
 <canvas id="passCv" width="1080" height="1440" hidden></canvas>
 
+<script src="i18n.js"></script>
 <script src="lib/maplibre-gl.js"></script>
 <script>
+translateStatic(document.body);
+
 // =====================================================================
 //  Diary Travel — веб-версия, повторяет приложение для iPhone
 // =====================================================================
@@ -341,10 +345,10 @@ const ICON = {
   search:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
 };
 const MODES = {
-  bus:  { name:'Автобус', ico:'🚌' },
-  train:{ name:'Поезд',   ico:'🚆' },
-  car:  { name:'Машина',  ico:'🚗' },
-  ferry:{ name:'Паром',   ico:'⛴' },
+  bus:  { name:T('Автобус'), ico:'🚌' },
+  train:{ name:T('Поезд'),   ico:'🚆' },
+  car:  { name:T('Машина'),  ico:'🚗' },
+  ferry:{ name:T('Паром'),   ico:'⛴' },
 };
 
 // ---------- утилиты ----------
@@ -352,7 +356,7 @@ function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 function lsGet(k,d){ try{ return localStorage.getItem(k) ?? d; }catch(e){ return d; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 function loadJ(k,d){ try{ return JSON.parse(localStorage.getItem(k)) ?? d; }catch(e){ return d; } }
-function saveJ(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast('Не удалось сохранить: '+e.message); } }
+function saveJ(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast(T('Не удалось сохранить: ')+e.message); } }
 function todayStr(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function dist(a,b){ const dLat=(b.lat-a.lat)*RAD, dLon=(b.lon-a.lon)*RAD; const h=Math.sin(dLat/2)**2+Math.cos(a.lat*RAD)*Math.cos(b.lat*RAD)*Math.sin(dLon/2)**2; return 2*6371*Math.asin(Math.min(1,Math.sqrt(h))); }
 function greatCircle(a,b,n){
@@ -370,16 +374,22 @@ function greatCircle(a,b,n){
   }
   return out;
 }
-const fmtKm = n => Math.round(n).toLocaleString('ru-RU');
+const fmtKm = n => Math.round(n).toLocaleString(LANG);
 const kmShort = n => n >= 100000 ? Math.round(n/1000)+'k' : fmtKm(n);
 function fmtDate(s){ if(!s) return ''; const [y,m,d]=s.split('-'); return `${d}.${m}.${y}`; }
-const MON_RU = ['янв.','февр.','мар.','апр.','мая','июня','июля','авг.','сент.','окт.','нояб.','дек.'];
-function dateShort(s){ if(!s) return ''; const [y,m,d]=s.split('-'); return `${+d} ${MON_RU[+m-1]} ${y}`; }
-function plural(n, one, few, many){ const m=n%10, h=n%100; return (m===1&&h!==11)?one:(m>=2&&m<=4&&(h<12||h>14))?few:many; }
-function hm(min){ const h=Math.floor(min/60), m=min%60; return h>0 ? `${h}ч ${m}м` : `${m}м`; }
+const DATE_FMT = new Intl.DateTimeFormat(LANG, {day:'numeric', month:'short', year:'numeric', timeZone:'UTC'});
+function dateShort(s){ if(!s) return ''; const [y,m,d]=s.split('-'); return DATE_FMT.format(Date.UTC(+y, +m-1, +d)); }
+/** склонение: формы для русского передаются как есть, для других языков берутся из словаря */
+function plural(n, one, few, many){
+  if(LANG==='ru'){ const m=n%10, h=n%100; return (m===1&&h!==11)?one:(m>=2&&m<=4&&(h<12||h>14))?few:many; }
+  const f = I18N_PLURALS[LANG]?.[one]; if(!f) return many;
+  const c = PLURAL_RULES.select(n); return f[c] ?? f.other;
+}
+function hm(min){ const h=Math.floor(min/60), m=min%60; return h>0 ? `${h}${T('ч')} ${m}${T('м')}` : `${m}${T('м')}`; }
 const estMin = km => Math.round(km/800*60 + 30);
 function daysUntil(date){ const a=new Date(todayStr()+'T00:00'), b=new Date(date+'T00:00'); return Math.round((b-a)/864e5); }
-function untilLabel(date){ const n=daysUntil(date); if(n<=0) return 'сегодня'; if(n===1) return 'завтра'; return `через ${n} ${plural(n,'день','дня','дней')}`; }
+const REL_FMT = new Intl.RelativeTimeFormat(LANG, {numeric:'auto'});
+function untilLabel(date){ const n=daysUntil(date); return REL_FMT.format(Math.max(0,n), 'day'); }
 // ---------- флаги: свои SVG (flags.json, набор flag-icons, MIT) — эмодзи-флагов нет в Windows ----------
 let FLAGS = {};
 const flagURLs = {}, flagImgs = {};
@@ -414,13 +424,13 @@ const yearOf = f => f.date ? f.date.slice(0,4) : 'none';
 
 // ---------- страны, территории, острова ----------
 const SOVEREIGN = new Set(`AF AL DZ AD AO AG AR AM AU AT AZ BS BH BD BB BY BE BZ BJ BT BO BA BW BR BN BG BF BI CV KH CM CA CF TD CL CN CO KM CG CD CR CI HR CU CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FJ FI FR GA GM GE DE GH GR GD GT GN GW GY HT HN HU IS IN ID IR IQ IE IL IT JM JP JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MG MW MY MV ML MT MH MR MU MX FM MD MC MN ME MA MZ MM NA NR NP NL NZ NI NE NG MK NO OM PK PW PA PG PY PE PH PL PT QA RO RU RW KN LC VC WS SM ST SA SN RS SC SL SG SK SI SB SO ZA SS ES LK SD SR SE CH SY TJ TZ TH TL TG TO TT TN TR TM TV UG UA AE GB US UY UZ VU VE VN YE ZM ZW VA PS XK TW`.split(/\s+/));
-const REGIONS = { 'ES-CN':['Канарские острова','ES'], 'ES-IB':['Балеарские острова','ES'], 'PT-30':['Мадейра','PT'], 'PT-20':['Азорские острова','PT'],
+const REGIONS = { 'ES-CN':[T('Канарские острова'),'ES'], 'ES-IB':[T('Балеарские острова'),'ES'], 'PT-30':[T('Мадейра'),'PT'], 'PT-20':[T('Азорские острова'),'PT'],
   // спорная территория: закрашивается отдельно и не засчитывается ни одной стране
-  'XC':['Крым',''] };
+  'XC':[T('Крым'),''] };
 const isDisputed = cc => REGIONS[cc]?.[1] === '';
 const isCountry = cc => SOVEREIGN.has(cc);
 const isRegion = cc => !!REGIONS[cc];
-const countryName = (()=>{ let dn=null; try{ dn=new Intl.DisplayNames(['ru'],{type:'region'}); }catch(e){} const cache={};
+const countryName = (()=>{ let dn=null; try{ dn=new Intl.DisplayNames([LANG],{type:'region'}); }catch(e){} const cache={};
   return cc => cache[cc] ??= (REGIONS[cc]?.[0] || (dn && /^[A-Z]{2}$/.test(cc) ? dn.of(cc) : cc) || cc); })();
 
 /** флаг островов-регионов, у которых нет эмодзи: рисуем упрощённо */
@@ -617,7 +627,7 @@ function journeyMap(j){
   for(const [cc,v] of Object.entries(m)) if(set.has(cc) || (REGIONS[cc] && set.has(REGIONS[cc][1]))) out[cc]=v;
   return out;
 }
-function journeyTitle(j){ return j.title?.trim() || (j.countries.slice(0,3).map(countryName).join(', ') + (j.countries.length>3 ? ` и ещё ${j.countries.length-3}` : '')); }
+function journeyTitle(j){ return j.title?.trim() || (j.countries.slice(0,3).map(countryName).join(', ') + (j.countries.length>3 ? ` ${T('и ещё')} ${j.countries.length-3}` : '')); }
 function journeyDates(j){ if(j.start===j.end) return fmtDate(j.start); return j.start.slice(0,4)===j.end.slice(0,4) ? fmtDate(j.start).slice(0,5)+' – '+fmtDate(j.end) : fmtDate(j.start)+' – '+fmtDate(j.end); }
 /** наземные поездки, сгруппированные по group (одна поездка Прага → Брно → Вена = несколько участков) */
 function tripGroups(){
@@ -887,7 +897,7 @@ $('#addCountry').innerHTML = ICON.plus;
 function years(){
   return [...new Set(flights.map(yearOf))].sort((a,b)=> a==='none' ? 1 : b==='none' ? -1 : b.localeCompare(a));
 }
-const yearLabel = y => y==='all' ? 'Всё время' : y==='none' ? 'Без даты' : y;
+const yearLabel = y => y==='all' ? T('Всё время') : y==='none' ? T('Без даты') : y;
 
 /** всплывающее меню (выбор года, «⋯» у строк) */
 function popMenu(anchor, items, opts={}){
@@ -924,7 +934,7 @@ function bindContext(el, items){
 }
 
 // ---------- страница Fly ----------
-const CABINS = [['','Не указан'],['E','Эконом'],['P','Премиум-эконом'],['B','Бизнес'],['F','Первый']];
+const CABINS = [['',T('Не указан')],['E',T('Эконом')],['P',T('Премиум-эконом')],['B',T('Бизнес')],['F',T('Первый')]];
 const cabinName = c => (CABINS.find(x=>x[0]===c)?.[1]) || c;
 const SEAT_ICO = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M7 3h4v9h6a2 2 0 0 1 2 2v3h-2v4h-2v-4H9a2 2 0 0 1-2-2z"/></svg>';
 function chipsHTML(f, km){
@@ -1004,7 +1014,7 @@ function miniMapSVG({pts=[], arcs=[], lines=[], hl=[], minSpan=4, hlFit=true, W=
 function uCard({cls='', attrs='', ac, map, badge, badgeCls='', lead, top, title, chips, more=true}){
   return `<div class="row ucard ${cls}" ${attrs} style="--ac:${ac}">${map||''}${badge?`<span class="ubadge ${badgeCls}">${badge}</span>`:''}
     ${lead}<div class="main"><div class="top">${top||''}</div><div class="title">${title}</div>${chips||''}</div>
-    ${more?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
+    ${more?`<button class="more" aria-label="${T('Ещё')}">${ICON.dots}</button>`:''}</div>`;
 }
 const chipRow = arr => `<div class="chips">${arr.filter(Boolean).map(x=>`<span class="ch">${x}</span>`).join('')}</div>`;
 function flagsLead(ccs){
@@ -1024,8 +1034,8 @@ function flightCard(a){
 }
 function flightMenu(id){
   const a = allArcs().find(x=>x.id===id); if(!a) return [];
-  return [{label:'Подробнее', act:()=>openFlightDetail(a)}, {label:'Изменить', act:()=>openFlightForm(a.f)}, '-',
-          {label:'Удалить', danger:true, act:()=>confirmDialog('Удалить этот перелёт?', 'Удалить', ()=>deleteFlight(id))}];
+  return [{label:T('Подробнее'), act:()=>openFlightDetail(a)}, {label:T('Изменить'), act:()=>openFlightForm(a.f)}, '-',
+          {label:T('Удалить'), danger:true, act:()=>confirmDialog(T('Удалить этот перелёт?'), T('Удалить'), ()=>deleteFlight(id))}];
 }
 function deleteFlight(id){ if(selected===id) selected=null; flights = flights.filter(f=>f.id!==id); saveFlights(); setDetent(detent); }
 
@@ -1034,23 +1044,23 @@ function renderFly(){
   const arcs = yearArcs(), done = arcs.filter(a=>!a.up);
   const ap = new Set(done.flatMap(a=>[a.a.iata,a.b.iata])), cs = new Set(done.flatMap(a=>[a.a.country,a.b.country]));
   const km = done.reduce((s,a)=>s+a.km,0);
-  $('#flyTiles').innerHTML = [[done.length, plural(done.length,'рейс','рейса','рейсов')],[kmShort(km),'км'],[ap.size,'аэроп.'],[cs.size, plural(cs.size,'страна','страны','стран')]]
+  $('#flyTiles').innerHTML = [[done.length, plural(done.length,'рейс','рейса','рейсов')],[kmShort(km),T('км')],[ap.size,T('аэроп.')],[cs.size, plural(cs.size,'страна','страны','стран')]]
     .map(([v,l])=>`<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
   const s = arcs.find(a=>a.id===selected);
   $('#selCard').innerHTML = s ? `<div class="selcard" style="--ac:${brandRGB(airlineCode(s.f))}">${logoHTML(airlineCode(s.f))}
-      <div class="main"><b>${esc(s.a.city)} → ${esc(s.b.city)}</b><small>${[flightNumber(s.f), s.f.date?dateShort(s.f.date):null, fmtKm(s.km)+' км'].filter(Boolean).map(esc).join(' · ')}</small></div>
-      <button class="more-btn" id="selMore">Подробнее</button><button class="xbtn" id="selX">${ICON.x}</button></div>` : '';
+      <div class="main"><b>${esc(s.a.city)} → ${esc(s.b.city)}</b><small>${[flightNumber(s.f), s.f.date?dateShort(s.f.date):null, fmtKm(s.km)+T(' км')].filter(Boolean).map(esc).join(' · ')}</small></div>
+      <button class="more-btn" id="selMore">${T('Подробнее')}</button><button class="xbtn" id="selX">${ICON.x}</button></div>` : '';
   if(s){ $('#selMore').onclick=()=>openFlightDetail(s); $('#selX').onclick=()=>selectFlight(null); }
   const list = $('#flyList');
   if(!arcs.length){
-    list.innerHTML = `<div class="empty"><div class="ico">✈︎</div>${flights.length ? 'За этот период перелётов нет.' : 'Пока нет перелётов.<br>Нажмите «+» или импортируйте файл в профиле.'}</div>`;
+    list.innerHTML = `<div class="empty"><div class="ico">✈︎</div>${flights.length ? T('За этот период перелётов нет.') : T('Пока нет перелётов.<br>Нажмите «+» или импортируйте файл в профиле.')}</div>`;
     return;
   }
   const up = arcs.filter(a=>a.up).sort((a,b)=>a.f.date.localeCompare(b.f.date));
   const past = arcs.filter(a=>!a.up).sort((a,b)=> (b.f.date||'').localeCompare(a.f.date||'') || b.id-a.id);
-  let h = up.length ? `<div class="sec blue">Предстоящие рейсы</div>` + up.map(flightCard).join('') + '<div style="height:6px"></div>' : '';
+  let h = up.length ? `<div class="sec blue">${T('Предстоящие рейсы')}</div>` + up.map(flightCard).join('') + '<div style="height:6px"></div>' : '';
   let cur = null;
-  for(const a of past){ const y = a.f.date ? a.f.date.slice(0,4) : 'Без даты'; if(y!==cur){ cur=y; h += `<div class="sec">${y}</div>`; } h += flightCard(a); }
+  for(const a of past){ const y = a.f.date ? a.f.date.slice(0,4) : T('Без даты'); if(y!==cur){ cur=y; h += `<div class="sec">${y}</div>`; } h += flightCard(a); }
   list.innerHTML = h; hydrateMiniMaps(list);
   list.querySelectorAll('.row').forEach(el=>{
     const id = Number(el.dataset.id);
@@ -1080,54 +1090,54 @@ function tripRow(legs){
     map: miniMapSlot('t'+legs[0].id, {pts, lines:[pts], minSpan:3}),
     badge: legs[0].date ? dateShort(legs[0].date) : '', badgeCls:'past',
     lead: `<div class="ulead emoji">${m.ico}</div>`, top: [m.name, legs[0].note?esc(legs[0].note):null].filter(Boolean).join(' · '),
-    title: esc(legsTitle(legs)), chips: chipRow([fmtKm(km)+' км', legs.length>1?`${legs.length} ${plural(legs.length,'участок','участка','участков')}`:null, ccs.map(cc=>flagHTML(cc,14)).join(' ')])});
+    title: esc(legsTitle(legs)), chips: chipRow([fmtKm(km)+T(' км'), legs.length>1?`${legs.length} ${plural(legs.length,'участок','участка','участков')}`:null, ccs.map(cc=>flagHTML(cc,14)).join(' ')])});
 }
 function countryRow(v){
   const cont = CONT_OF[v.cc] || CONT_OF[REGIONS[v.cc]?.[1]] || '';
   return uCard({cls:selCountry===v.cc?'on':'', attrs:`data-c="${v.cc}"`, ac:hashRGB(v.cc), more:!!v.manual,
-    map: miniMapSlot('c'+v.cc, {hl:[v.cc], minSpan:6}), badge: isDisputed(v.cc)?'спорная':'', badgeCls:'past',
-    lead: flagsLead([v.cc]), top: esc(cont), title: esc(countryName(v.cc)),
-    chips: chipRow([v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null, v.cities?`📍 ${v.cities}`:null, v.manual?'вручную':null])});
+    map: miniMapSlot('c'+v.cc, {hl:[v.cc], minSpan:6}), badge: isDisputed(v.cc)?T('спорная'):'', badgeCls:'past',
+    lead: flagsLead([v.cc]), top: esc(cont && T(cont)), title: esc(countryName(v.cc)),
+    chips: chipRow([v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null, v.cities?`📍 ${v.cities}`:null, v.manual?T('вручную'):null])});
 }
 function renderCountry(){
   document.querySelectorAll('#layerSeg button').forEach(b=>b.classList.toggle('on', b.dataset.l===layer));
-  const vm = visitedMap(), visited = Object.values(vm).sort((a,b)=>countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
+  const vm = visitedMap(), visited = Object.values(vm).sort((a,b)=>countryName(a.cc).localeCompare(countryName(b.cc),LANG));
   const countries = visited.filter(v=>isCountry(v.cc)), terr = visited.filter(v=>!isCountry(v.cc));
-  $('#countryTiles').innerHTML = [[countries.length, plural(countries.length,'страна','страны','стран')],[Math.round(countries.length/195*100)+'%','мира'],[terr.length,'террит.'],[journeys.length,'путеш.']]
+  $('#countryTiles').innerHTML = [[countries.length, plural(countries.length,'страна','страны','стран')],[Math.round(countries.length/195*100)+'%',T('мира')],[terr.length,T('террит.')],[journeys.length,T('путеш.')]]
     .map(([v,l])=>`<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
   const js = [...journeys].sort((a,b)=>b.start.localeCompare(a.start)), tg = tripGroups();
   const list = $('#countryList');
   if(!visited.length && !js.length && !tg.length){
-    list.innerHTML = `<div class="empty"><div class="ico">🌍</div>Страны появятся из перелётов.<br>Нажмите «+», чтобы отметить страну вручную или добавить путешествие.</div>`; return;
+    list.innerHTML = `<div class="empty"><div class="ico">🌍</div>${T('Страны появятся из перелётов.')}<br>${T('Нажмите «+», чтобы отметить страну вручную или добавить путешествие.')}</div>`; return;
   }
   // вкладки списка: путешествия / страны (или города) / наземные поездки
   const cs = layer==='cities' ? currentCities() : [];
   const placesN = layer==='cities' ? cs.filter(c=>!c.home).length : countries.length + terr.length;
-  const tabs = [['journeys','Путешествия',js.length],['places', layer==='cities'?'Города':'Страны', placesN],['trips','Наземные поездки',tg.length]];
+  const tabs = [['journeys',T('Путешествия'),js.length],['places', layer==='cities'?T('Города'):T('Страны'), placesN],['trips',T('Наземные поездки'),tg.length]];
   $('#listTabs').innerHTML = tabs.map(([k,l,n])=>`<button data-t="${k}" class="${k===listTab?'on':''}">${l}<small>${n}</small></button>`).join('');
   let h='';
   if(listTab==='journeys'){
-    h = js.length ? js.map(journeyRow).join('') : `<div class="empty">Путешествий пока нет.<br>Нажмите «+» → «Новое путешествие».</div>`;
+    h = js.length ? js.map(journeyRow).join('') : `<div class="empty">${T('Путешествий пока нет.')}<br>${T('Нажмите «+» → «Новое путешествие».')}</div>`;
   } else if(listTab==='trips'){
-    h = tg.length ? tg.map(tripRow).join('') : `<div class="empty">Наземных поездок пока нет.<br>Нажмите «+» → «Наземная поездка».</div>`;
+    h = tg.length ? tg.map(tripRow).join('') : `<div class="empty">${T('Наземных поездок пока нет.')}<br>${T('Нажмите «+» → «Наземная поездка».')}</div>`;
   } else if(layer==='cities'){
-    h = cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`;
+    h = cs.length ? cs.map(cityRow).join('') : `<div class="empty">${T('Города появятся из перелётов и наземных поездок')}</div>`;
   } else {
-    if(countries.length) h += `<div class="sec">Страны</div>` + countries.map(countryRow).join('');
-    if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
-    if(!h) h = `<div class="empty">Страны появятся из перелётов.<br>Нажмите «+», чтобы отметить страну вручную.</div>`;
+    if(countries.length) h += `<div class="sec">${T('Страны')}</div>` + countries.map(countryRow).join('');
+    if(terr.length) h += `<div class="sec">${T('Территории и острова')}</div>` + terr.map(countryRow).join('');
+    if(!h) h = `<div class="empty">${T('Страны появятся из перелётов.')}<br>${T('Нажмите «+», чтобы отметить страну вручную.')}</div>`;
   }
   list.innerHTML = h; hydrateMiniMaps(list);
   list.querySelectorAll('[data-city]').forEach(el=>{
     const cm = currentCities().find(x=>x.key===el.dataset.city);
-    const menu = ()=> cm?.manual ? [{label:'Снять отметку', danger:true, act:()=>{ const ids=new Set(cm.manual); mcities=mcities.filter(x=>!ids.has(x.id)); saveCities(); }}] : [];
+    const menu = ()=> cm?.manual ? [{label:T('Снять отметку'), danger:true, act:()=>{ const ids=new Set(cm.manual); mcities=mcities.filter(x=>!ids.has(x.id)); saveCities(); }}] : [];
     if(cm?.manual) bindContext(el, menu);
     el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), menu()); return; }
     const c = cm;
     if(c && mapReady){ setDetent('low'); setTimeout(()=>map.easeTo({center:[c.lon,c.lat], zoom:7, padding:insets(), duration:900}), 80); } }; });
   list.querySelectorAll('[data-j]').forEach(el=>{
     const j = journeys.find(x=>x.id===Number(el.dataset.j));
-    const menu = ()=>[{label:'Изменить', act:()=>openJourneyForm(j)}, {label:'Удалить путешествие', danger:true, act:()=>confirmDialog('Удалить это путешествие?','Удалить',()=>{ if(selJourney===j.id) selJourney=null; journeys=journeys.filter(x=>x.id!==j.id); saveJourneys(); })}];
+    const menu = ()=>[{label:T('Изменить'), act:()=>openJourneyForm(j)}, {label:T('Удалить путешествие'), danger:true, act:()=>confirmDialog(T('Удалить это путешествие?'),T('Удалить'),()=>{ if(selJourney===j.id) selJourney=null; journeys=journeys.filter(x=>x.id!==j.id); saveJourneys(); })}];
     el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), menu()); return; }
       selCountry=null; selJourney = selJourney===j.id ? null : j.id; refresh();
       if(selJourney!=null){ setDetent('low'); setTimeout(()=>focusJourney(j), 80); } };
@@ -1135,13 +1145,13 @@ function renderCountry(){
   });
   list.querySelectorAll('[data-t]').forEach(el=>{
     const legs = tg.find(g=>g[0].id===Number(el.dataset.t));
-    const menu = ()=>[{label:'Изменить', act:()=>openTripForm(legs)}, {label:'Удалить поездку', danger:true, act:()=>confirmDialog('Удалить эту поездку?','Удалить',()=>deleteTrip(legs))}];
+    const menu = ()=>[{label:T('Изменить'), act:()=>openTripForm(legs)}, {label:T('Удалить поездку'), danger:true, act:()=>confirmDialog(T('Удалить эту поездку?'),T('Удалить'),()=>deleteTrip(legs))}];
     el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), menu()); return; } openTripForm(legs); };
     bindContext(el, menu);
   });
   list.querySelectorAll('[data-c]').forEach(el=>{
     const cc = el.dataset.c, v = vm[cc];
-    const menu = ()=> v.manual ? [{label:'Снять отметку', danger:true, act:()=>{ manual=manual.filter(x=>x!==cc); saveManual(); }}] : [];
+    const menu = ()=> v.manual ? [{label:T('Снять отметку'), danger:true, act:()=>{ manual=manual.filter(x=>x!==cc); saveManual(); }}] : [];
     el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), menu()); return; }
       selJourney=null; selCountry = selCountry===cc ? null : cc; refresh(); if(selCountry){ setDetent('low'); setTimeout(()=>focusCountry(cc), 80); } };
     if(v.manual) bindContext(el, menu);
@@ -1153,10 +1163,10 @@ $('#listTabs').onclick = e=>{ const b=e.target.closest('[data-t]'); if(!b) retur
 $('#layerSeg').onclick = e=>{ const b=e.target.closest('[data-l]'); if(!b) return; layer=b.dataset.l; lsSet('map.layer', layer); listTab='places'; lsSet('country.tab', listTab); selCountry=null; refresh(); };
 $('#countryShare').onclick = ()=>ShareModal.open('country');
 $('#addCountry').onclick = e=>popMenu(e.currentTarget, [
-  {label:'🏳  Отметить страны', act:()=>openManualPicker()},
-  {label:'🧳  Новое путешествие', act:()=>openJourneyForm(null)},
-  {label:'📍  Отметить город', act:()=>openCityForm()},
-  {label:'🚌  Наземная поездка', act:()=>openTripForm(null)},
+  {label:T('🏳  Отметить страны'), act:()=>openManualPicker()},
+  {label:T('🧳  Новое путешествие'), act:()=>openJourneyForm(null)},
+  {label:T('📍  Отметить город'), act:()=>openCityForm()},
+  {label:T('🚌  Наземная поездка'), act:()=>openTripForm(null)},
 ]);
 $('#profileBtn').onclick = ()=>openProfile();
 
@@ -1173,7 +1183,7 @@ function refresh(){
 // =====================================================================
 const modalStack = [];
 /** окно-шторка: заголовок, кнопки слева/справа, тело */
-function openModal({title='', left='Отмена', right=null, rightPrimary=true, cls='', onRight=null, onClose=null}){
+function openModal({title='', left=T('Отмена'), right=null, rightPrimary=true, cls='', onRight=null, onClose=null}){
   const wrap = document.createElement('div'); wrap.className='modal';
   wrap.innerHTML = `<div class="mbox ${cls}"><div class="mhead">
       <button class="mbtn" data-a="l" ${left?'':'style="visibility:hidden"'}>${esc(left||'·')}</button>
@@ -1200,12 +1210,12 @@ function dialog({title, message='', buttons}){
   m.body.innerHTML = `<div style="text-align:center;padding:18px 6px 6px"><div style="font-weight:600;font-size:16px">${esc(title)}</div>
     ${message?`<div class="gfoot" style="margin-top:6px">${esc(message)}</div>`:''}</div>
     <div class="grp">${buttons.map((b,i)=>`<button class="gi" data-i="${i}" style="justify-content:center;${b.danger?'color:var(--danger)':'color:var(--accent)'};${b.bold?'font-weight:600':''}">${esc(b.label)}</button>`).join('')}</div>
-    <div class="grp"><button class="gi" data-x style="justify-content:center;color:var(--accent);font-weight:600">Отмена</button></div>`;
+    <div class="grp"><button class="gi" data-x style="justify-content:center;color:var(--accent);font-weight:600">${T('Отмена')}</button></div>`;
   m.body.onclick = e=>{ const b=e.target.closest('[data-i]'); if(b){ m.close(); buttons[+b.dataset.i].act(); } else if(e.target.closest('[data-x]')) m.close(); };
   return m;
 }
 function confirmDialog(title, label, act, message){ dialog({title, message, buttons:[{label, danger:true, act}]}); }
-function alertDialog(title, message){ const m = dialog({title, message, buttons:[]}); m.body.querySelector('[data-x]').textContent='Понятно'; }
+function alertDialog(title, message){ const m = dialog({title, message, buttons:[]}); m.body.querySelector('[data-x]').textContent=T('Понятно'); }
 
 // ---------- AeroDataBox (RapidAPI) ----------
 const API = {
@@ -1214,14 +1224,14 @@ const API = {
   get hasKey(){ return !!this.key; },
   cache:{}, lastTotal:0,
   async get(path){
-    if(!this.hasKey) throw new Error('Добавьте ключ AeroDataBox в профиле');
+    if(!this.hasKey) throw new Error(T('Добавьте ключ AeroDataBox в профиле'));
     let r;
     try{ r = await fetch('https://aerodatabox.p.rapidapi.com'+path, {headers:{'X-RapidAPI-Key':this.key,'X-RapidAPI-Host':'aerodatabox.p.rapidapi.com'}}); }
-    catch(e){ throw new Error('Нет связи с сервисом расписаний'); }
+    catch(e){ throw new Error(T('Нет связи с сервисом расписаний')); }
     if(r.status===204 || r.status===404) return [];
-    if(r.status===401 || r.status===403) throw new Error('Ключ не подходит — проверьте его в профиле');
-    if(r.status===429){ const t=(await r.text()).toLowerCase(); const e=new Error(t.includes('quota') ? 'Бесплатные запросы на этот месяц закончились' : 'Слишком много запросов подряд — подождите минуту'); e.limit=t.includes('quota'); throw e; }
-    if(!r.ok) throw new Error('Сервис расписаний ответил ошибкой '+r.status);
+    if(r.status===401 || r.status===403) throw new Error(T('Ключ не подходит — проверьте его в профиле'));
+    if(r.status===429){ const t=(await r.text()).toLowerCase(); const e=new Error(t.includes('quota') ? T('Бесплатные запросы на этот месяц закончились') : T('Слишком много запросов подряд — подождите минуту')); e.limit=t.includes('quota'); throw e; }
+    if(!r.ok) throw new Error(T('Сервис расписаний ответил ошибкой ')+r.status);
     const txt = await r.text(); try{ return JSON.parse(txt); }catch(e){ return []; }
   },
   code(m){ const ap=m?.airport; if(!ap) return ''; if(ap.iata) return ap.iata.toUpperCase(); const a=BY_ICAO[(ap.icao||'').toUpperCase()]; return a ? a.iata : ''; },
@@ -1272,11 +1282,11 @@ function searchAirports(q){
   return out;
 }
 function pickAirport(title, cb){
-  const m = openModal({title, left:'Назад'});
-  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="WAW, Варшава…" autocomplete="off" autocapitalize="characters"></div><div class="grp" id="apRes" hidden></div><div class="empty" id="apHint">Код (WAW), город или название</div>`;
+  const m = openModal({title, left:T('Назад')});
+  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="${T('WAW, Варшава…')}" autocomplete="off" autocapitalize="characters"></div><div class="grp" id="apRes" hidden></div><div class="empty" id="apHint">${T('Код (WAW), город или название')}</div>`;
   const inp = m.body.querySelector('input'), res = m.body.querySelector('#apRes'), hint = m.body.querySelector('#apHint');
   inp.oninput = ()=>{
-    const r = searchAirports(inp.value); res.hidden = !r.length; hint.hidden = !!r.length || !!inp.value; if(inp.value && !r.length){ hint.hidden=false; hint.textContent='Ничего не найдено'; }
+    const r = searchAirports(inp.value); res.hidden = !r.length; hint.hidden = !!r.length || !!inp.value; if(inp.value && !r.length){ hint.hidden=false; hint.textContent=T('Ничего не найдено'); }
     res.innerHTML = r.map(a=>`<button class="gi" data-i="${a.iata}"><span class="code" style="width:46px">${a.iata}</span><span style="min-width:0"><div>${esc(a.city||a.name)}</div><div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.name)} · ${a.country}</div></span></button>`).join('');
   };
   res.onclick = e=>{ const b=e.target.closest('[data-i]'); if(b){ m.close(); cb(BY_IATA[b.dataset.i]); } };
@@ -1290,54 +1300,54 @@ function openFlightForm(editing){
       aircraft:editing.aircraft||'', reg:editing.reg||'', seat:editing.seat||'', cabin:editing.cabin||'', depTime:editing.depTime||'', arrTime:editing.arrTime||'', durMin:editing.durMin||0 }
     : { from: lastTo ? BY_IATA[lastTo] : null, to:null, hasDate:true, date:todayStr(), airline:'', aircraft:'', reg:'', seat:'', cabin:'', depTime:'', arrTime:'', durMin:0 };
   let found=[], searching=false, searched=false, apiError=null;
-  const m = openModal({title: editing ? 'Изменить перелёт' : 'Новый перелёт', right: editing ? 'Сохранить' : 'Добавить', cls:'tall', onRight: save});
+  const m = openModal({title: editing ? T('Изменить перелёт') : T('Новый перелёт'), right: editing ? T('Сохранить') : T('Добавить'), cls:'tall', onRight: save});
   m.body.innerHTML = `
     <div class="grp"><button class="gi" data-pick="from"></button><button class="gi" data-pick="to"></button></div>
-    <div class="grp"><div class="gi"><span>Дата</span><span class="toggle" id="ffDateT"></span></div><div class="gi" id="ffDateRow"><span class="lbl">Дата вылета</span><input type="date" id="ffDate" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="grp"><div class="gi"><span>${T('Дата')}</span><span class="toggle" id="ffDateT"></span></div><div class="gi" id="ffDateRow"><span class="lbl">${T('Дата вылета')}</span><input type="date" id="ffDate" style="text-align:right;color-scheme:dark"></div></div>
     <div id="ffSched"></div>
-    <div class="ghead">Рейс</div>
-    <div class="grp"><div class="gi"><span id="ffLogo"></span><input id="ffAirline" placeholder="Рейс, напр. W6 1441 или LO 16" autocapitalize="characters" autocomplete="off"></div><div id="ffAirInfo"></div></div>
-    <div class="ghead">Детали (необязательно)</div>
+    <div class="ghead">${T('Рейс')}</div>
+    <div class="grp"><div class="gi"><span id="ffLogo"></span><input id="ffAirline" placeholder="${T('Рейс, напр. W6 1441 или LO 16')}" autocapitalize="characters" autocomplete="off"></div><div id="ffAirInfo"></div></div>
+    <div class="ghead">${T('Детали (необязательно)')}</div>
     <div class="grp">
-      <div class="gi"><input id="ffAircraft" placeholder="Самолёт, напр. A21N, B789" autocapitalize="characters" autocomplete="off"></div>
-      <div class="gi"><input id="ffReg" placeholder="Бортовой номер, напр. 9H-WAD" autocapitalize="characters" autocomplete="off"></div>
-      <div class="gi"><input id="ffSeat" placeholder="Место, напр. 18A" autocapitalize="characters" autocomplete="off"></div>
-      <div class="gi"><span>Класс</span><select id="ffCabin">${CABINS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
+      <div class="gi"><input id="ffAircraft" placeholder="${T('Самолёт, напр. A21N, B789')}" autocapitalize="characters" autocomplete="off"></div>
+      <div class="gi"><input id="ffReg" placeholder="${T('Бортовой номер, напр. 9H-WAD')}" autocapitalize="characters" autocomplete="off"></div>
+      <div class="gi"><input id="ffSeat" placeholder="${T('Место, напр. 18A')}" autocapitalize="characters" autocomplete="off"></div>
+      <div class="gi"><span>${T('Класс')}</span><select id="ffCabin">${CABINS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
     </div>
     <div id="ffWarn"></div>
-    ${editing ? `<div class="grp"><button class="gi danger" id="ffDel">Удалить перелёт</button></div>` : ''}`;
+    ${editing ? `<div class="grp"><button class="gi danger" id="ffDel">${T('Удалить перелёт')}</button></div>` : ''}`;
   const B = m.body, q = s2=>B.querySelector(s2);
   q('#ffDate').value = s.date; q('#ffAirline').value = s.airline; q('#ffAircraft').value = s.aircraft; q('#ffReg').value = s.reg; q('#ffSeat').value = s.seat; q('#ffCabin').value = s.cabin;
-  const field = (lbl, a)=>`<span class="lbl">${lbl}</span><span class="val">${a ? `<span class="code">${a.iata}</span><span style="overflow:hidden;text-overflow:ellipsis">${esc(a.city||a.name)}</span>` : '<span style="color:var(--muted)">Выбрать</span>'}<span style="color:#555">›</span></span>`;
-  function outOfRange(){ const d=daysUntil(s.date); if(d < -365) return 'Перелёт старше года — бесплатная база хранит данные только за последние 365 дней. Детали можно заполнить вручную.'; if(d > 365) return 'Дата дальше чем через год — расписание на неё пока недоступно.'; return null; }
+  const field = (lbl, a)=>`<span class="lbl">${lbl}</span><span class="val">${a ? `<span class="code">${a.iata}</span><span style="overflow:hidden;text-overflow:ellipsis">${esc(a.city||a.name)}</span>` : T('<span style="color:var(--muted)">Выбрать</span>')}<span style="color:#555">›</span></span>`;
+  function outOfRange(){ const d=daysUntil(s.date); if(d < -365) return T('Перелёт старше года — бесплатная база хранит данные только за последние 365 дней. Детали можно заполнить вручную.'); if(d > 365) return T('Дата дальше чем через год — расписание на неё пока недоступно.'); return null; }
   function paint(){
-    q('[data-pick="from"]').innerHTML = field('Откуда', s.from); q('[data-pick="to"]').innerHTML = field('Куда', s.to);
+    q('[data-pick="from"]').innerHTML = field(T('Откуда'), s.from); q('[data-pick="to"]').innerHTML = field(T('Куда'), s.to);
     q('#ffDateT').classList.toggle('on', s.hasDate); q('#ffDateRow').hidden = !s.hasDate;
     const p = parseAirline(s.airline);
     q('#ffLogo').innerHTML = logoHTML(p?.code, 'sm').replace('logo sm','logo sm" style="width:30px;height:30px');
     const al = p?.code && AIRLINES[p.code];
     q('#ffAirInfo').innerHTML = (al ? `<div class="gi note">${esc(al[0])}</div>` : '')
-      + (s.depTime ? `<div class="gi blue">Вылет ${s.depTime} → прилёт ${s.arrTime||'—'}${s.durMin>0?' · '+hm(s.durMin):''}</div>` : '')
-      + (API.hasKey && p?.number && s.hasDate ? `<button class="gi link" id="ffByNum" ${searching||outOfRange()?'disabled style="opacity:.45"':''}>⬇︎ ${searching?'Ищу…':'Подтянуть данные по номеру рейса'}</button>` : '');
+      + (s.depTime ? `<div class="gi blue">${T('Вылет')} ${s.depTime} ${T('→ прилёт')} ${s.arrTime||'—'}${s.durMin>0?' · '+hm(s.durMin):''}</div>` : '')
+      + (API.hasKey && p?.number && s.hasDate ? `<button class="gi link" id="ffByNum" ${searching||outOfRange()?'disabled style="opacity:.45"':''}>⬇︎ ${searching?T('Ищу…'):T('Подтянуть данные по номеру рейса')}</button>` : '');
     const bn = q('#ffByNum'); if(bn) bn.onclick = lookupNumber;
     // расписание
     if(API.hasKey){
       const oor = s.hasDate ? outOfRange() : null, can = s.from && s.to && s.hasDate && !searching && !oor;
-      let h = `<div class="ghead">Расписание</div><div class="grp"><button class="gi link" id="ffRoute" ${can?'':'disabled style="opacity:.45"'}>${ICON.search} ${searching?'Ищу рейсы…':'Найти рейсы на эту дату'}</button>`;
+      let h = `<div class="ghead">${T('Расписание')}</div><div class="grp"><button class="gi link" id="ffRoute" ${can?'':'disabled style="opacity:.45"'}>${ICON.search} ${searching?T('Ищу рейсы…'):T('Найти рейсы на эту дату')}</button>`;
       if(oor) h += `<div class="gi note">📅 ${oor}</div>`;
-      if(searching) h += `<div class="gi note" style="text-align:center">Загрузка…</div>`;
+      if(searching) h += `<div class="gi note" style="text-align:center">${T('Загрузка…')}</div>`;
       h += found.map((r,i)=>foundRow(r,i)).join('');
       if(searched && !found.length && !apiError && !searching) h += `<div class="gi note">${API.lastTotal>0
-          ? `Из ${s.from?.iata||''} на эту дату в расписании ${API.lastTotal} вылетов, но прямых в ${s.to?.iata||''} среди них нет. Попробуйте номер рейса.`
-          : `Расписания ${s.from?.iata||''} на эту дату в базе пока нет — обычно оно появляется ближе к вылету. Можно ввести номер рейса вручную.`}</div>`;
+          ? `${T('Из')} ${s.from?.iata||''} ${T('на эту дату в расписании')} ${API.lastTotal} ${T('вылетов, но прямых в')} ${s.to?.iata||''} ${T('среди них нет. Попробуйте номер рейса.')}`
+          : `${T('Расписания')} ${s.from?.iata||''} ${T('на эту дату в базе пока нет — обычно оно появляется ближе к вылету. Можно ввести номер рейса вручную.')}`}</div>`;
       if(apiError) h += `<div class="gi err">${esc(apiError)}</div>`;
-      h += `</div><div class="gfoot">Данные: AeroDataBox. Поиск по маршруту — 4 единицы, по номеру — 2 (бесплатно 400 в месяц).</div>`;
+      h += `</div><div class="gfoot">${T('Данные: AeroDataBox. Поиск по маршруту — 4 единицы, по номеру — 2 (бесплатно 400 в месяц).')}</div>`;
       q('#ffSched').innerHTML = h;
       const rb=q('#ffRoute'); if(rb) rb.onclick = searchRoute;
       q('#ffSched').querySelectorAll('[data-f]').forEach(el=>el.onclick=()=>{ apply(found[+el.dataset.f]); });
     } else q('#ffSched').innerHTML = '';
     const same = s.from && s.to && s.from.iata===s.to.iata;
-    q('#ffWarn').innerHTML = same ? '<div class="gfoot" style="color:var(--danger)">Аэропорты вылета и прилёта совпадают.</div>' : '';
+    q('#ffWarn').innerHTML = same ? T('<div class="gfoot" style="color:var(--danger)">Аэропорты вылета и прилёта совпадают.</div>') : '';
     m.setRight(s.from && s.to && !same);
   }
   function foundRow(r, i){
@@ -1346,7 +1356,7 @@ function openFlightForm(editing){
       <div class="days"><b>${days}</b><small>${plural(days,'день','дня','дней')}</small></div>
       <div style="flex:1;min-width:0"><div class="m">${logoHTML(r.airlineIata||null,'sm')}<b style="color:var(--muted)">${esc(r.number)}</b>${r.model?' · '+esc(r.model):''}</div>
       <div class="t"><span>↗ ${r.from} ${r.depTime}</span><span>↘ ${r.to} ${r.arrTime}</span></div>
-      ${r.durMin>0?`<div class="m">В пути ${hm(r.durMin)}</div>`:''}</div>${chosen?'<span style="color:var(--accent)">✓</span>':''}</div>`;
+      ${r.durMin>0?`<div class="m">${T('В пути')} ${hm(r.durMin)}</div>`:''}</div>${chosen?'<span style="color:var(--accent)">✓</span>':''}</div>`;
   }
   function apply(r, setAirports){
     if(setAirports || !s.from) s.from = BY_IATA[r.from] || s.from;
@@ -1356,7 +1366,7 @@ function openFlightForm(editing){
     if(r.reg){ s.reg=r.reg; q('#ffReg').value=r.reg; }
     s.depTime=r.depTime; s.arrTime=r.arrTime; s.durMin=r.durMin; paint();
   }
-  function handle(e){ apiError = e.message; if(e.limit) alertDialog('Бесплатные запросы закончились', 'Лимит AeroDataBox на этот месяц исчерпан (400 единиц). Он обновится в начале следующего месяца подписки. Пока данные рейса можно заполнить вручную.'); }
+  function handle(e){ apiError = e.message; if(e.limit) alertDialog(T('Бесплатные запросы закончились'), T('Лимит AeroDataBox на этот месяц исчерпан (400 единиц). Он обновится в начале следующего месяца подписки. Пока данные рейса можно заполнить вручную.')); }
   async function searchRoute(){
     searching=true; apiError=null; paint();
     try{ found = await API.route(s.from.iata, s.to.iata, s.date); }catch(e){ handle(e); found=[]; }
@@ -1365,18 +1375,18 @@ function openFlightForm(editing){
   async function lookupNumber(){
     searching=true; apiError=null; paint();
     try{ const res = await API.byNumber(s.airline, s.date); const r = res.find(x=>x.from===s.from?.iata) || res[0];
-      if(r) apply(r, true); else apiError = `Рейс ${s.airline} на эту дату в базе не найден. Ближе к вылету данные могут появиться.`; }
+      if(r) apply(r, true); else apiError = `${T('Рейс')} ${s.airline} ${T('на эту дату в базе не найден. Ближе к вылету данные могут появиться.')}`; }
     catch(e){ handle(e); }
     searching=false; searched=true; paint();
   }
-  B.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>pickAirport(b.dataset.pick==='from'?'Откуда':'Куда', a=>{ s[b.dataset.pick]=a; found=[]; searched=false; paint(); }));
+  B.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>pickAirport(b.dataset.pick==='from'?T('Откуда'):T('Куда'), a=>{ s[b.dataset.pick]=a; found=[]; searched=false; paint(); }));
   q('#ffDateT').parentElement.onclick = ()=>{ s.hasDate=!s.hasDate; paint(); };
   q('#ffDate').onchange = e=>{ s.date = e.target.value || todayStr(); found=[]; searched=false; paint(); };
   q('#ffAirline').oninput = e=>{ s.airline=e.target.value; paintAir(); };
   let airT=null; function paintAir(){ clearTimeout(airT); airT=setTimeout(()=>{ const f=document.activeElement; paint(); f?.focus?.(); }, 250); }
   for(const [id,k] of [['#ffAircraft','aircraft'],['#ffReg','reg'],['#ffSeat','seat']]) q(id).oninput = e=>{ s[k]=e.target.value; };
   q('#ffCabin').onchange = e=>{ s.cabin=e.target.value; };
-  if(editing) q('#ffDel').onclick = ()=>confirmDialog('Удалить этот перелёт?','Удалить',()=>{ m.close(); deleteFlight(editing.id); });
+  if(editing) q('#ffDel').onclick = ()=>confirmDialog(T('Удалить этот перелёт?'),T('Удалить'),()=>{ m.close(); deleteFlight(editing.id); });
   function save(){
     if(!s.from || !s.to) return;
     const t = x=>(x||'').trim();
@@ -1393,7 +1403,7 @@ function openFlightForm(editing){
 // ---------- карточка рейса ----------
 function openFlightDetail(a){
   const f=a.f, code=airlineCode(f), al = code && AIRLINES[code];
-  const m = openModal({title:'', left:null, right:'Готово', cls:'tall'}); m.el.querySelector('.mbox').style.setProperty('--tint', brandRGB(code));
+  const m = openModal({title:'', left:null, right:T('Готово'), cls:'tall'}); m.el.querySelector('.mbox').style.setProperty('--tint', brandRGB(code));
   const grid = items => `<div class="kv">${items.filter(x=>x[1]).map(([k,v])=>`<div><small>${k}</small><b>${esc(v)}</b></div>`).join('')}</div>`;
   const all = doneArcs(), same = all.filter(x=>x.a.iata===f.from && x.b.iata===f.to), back = all.filter(x=>x.a.iata===f.to && x.b.iata===f.from);
   const rkm = same.reduce((s,x)=>s+x.km,0), rmin = same.reduce((s,x)=>s+estMin(x.km),0);
@@ -1403,40 +1413,40 @@ function openFlightDetail(a){
     <div style="display:flex;gap:12px;align-items:center;margin:4px 0 6px">${logoHTML(code).replace('class="logo "','class="logo" style="width:48px;height:48px"')}
       <div style="min-width:0"><div style="font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase">${[flightNumber(f), f.date?dateShort(f.date):null].filter(Boolean).map(esc).join(' · ')}</div>
       <div style="font-size:24px;font-weight:700">${esc(a.a.city)} → ${esc(a.b.city)}</div></div></div>
-    <div class="card hero">${miniMapSVG({pts:[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]], arcs:[[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]]], W:320, H:120, fade:false, cls:'hmap'})}<div class="route">${end(a.a,true)}<div class="mid"><div class="pl">✈︎</div>${fmtKm(a.km)} км<br>${f.durMin>0?hm(f.durMin):'≈'+hm(estMin(a.km))}${f.depTime?`<br><b style="color:var(--text);font-size:13px">${f.depTime} → ${f.arrTime}</b>`:''}</div>${end(a.b,false)}</div>
+    <div class="card hero">${miniMapSVG({pts:[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]], arcs:[[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]]], W:320, H:120, fade:false, cls:'hmap'})}<div class="route">${end(a.a,true)}<div class="mid"><div class="pl">✈︎</div>${fmtKm(a.km)} ${T('км')}<br>${f.durMin>0?hm(f.durMin):'≈'+hm(estMin(a.km))}${f.depTime?`<br><b style="color:var(--text);font-size:13px">${f.depTime} → ${f.arrTime}</b>`:''}</div>${end(a.b,false)}</div>
       ${a.up?`<div style="text-align:center;margin-top:10px"><span class="badge">${untilLabel(f.date)}</span></div>`:''}<div style="margin-top:12px">${chipsHTML(f,a.km)}</div></div>
-    ${(f.aircraft||f.reg||f.seat||f.cabin) ? `<div class="card"><h3>Самолёт и место</h3>${planeImg(AircraftNames.full(f.aircraft),'plane hero')}${grid([['Самолёт', AircraftNames.full(f.aircraft) || f.aircraft],['Борт',f.reg],['Класс',f.cabin?cabinName(f.cabin):''],['Место',f.seat]])}</div>` : ''}
-    ${al ? `<div class="card"><h3>${logoHTML(code,'sm').replace('logo sm','logo sm" style="width:34px;height:34px')}${esc(al[0])}</h3>${grid([['Позывной',al[2]],['ICAO',al[1]],['IATA',code]])}</div>`
-         : f.airline ? `<div class="card"><h3>Авиакомпания</h3><b>${esc(f.airline)}</b></div>` : ''}
-    <div class="card"><h3 style="margin-bottom:2px">Моя история на маршруте</h3><div style="color:var(--muted);font-size:14px;margin-bottom:12px">${f.from} → ${f.to}</div>
-      ${grid([['Перелётов',String(same.length)],['Расстояние',kmShort(rkm)+' км'],['В воздухе',hm(rmin)]])}
-      <div class="gfoot" style="margin-top:10px">${same.length ? 'Последний раз: '+dateShort(lastD||'') : 'Вы ещё не летали этим маршрутом'}</div>
-      ${back.length?`<div class="gfoot">Обратно ${f.to} → ${f.from}: ${back.length} ${plural(back.length,'раз','раза','раз')}</div>`:''}</div>
-    <button class="btn" id="fdEdit">✎ Изменить перелёт</button>
-    <button class="btn red" id="fdDel">Удалить перелёт</button>`;
+    ${(f.aircraft||f.reg||f.seat||f.cabin) ? `<div class="card"><h3>${T('Самолёт и место')}</h3>${planeImg(AircraftNames.full(f.aircraft),'plane hero')}${grid([[T('Самолёт'), AircraftNames.full(f.aircraft) || f.aircraft],[T('Борт'),f.reg],[T('Класс'),f.cabin?cabinName(f.cabin):''],[T('Место'),f.seat]])}</div>` : ''}
+    ${al ? `<div class="card"><h3>${logoHTML(code,'sm').replace('logo sm','logo sm" style="width:34px;height:34px')}${esc(al[0])}</h3>${grid([[T('Позывной'),al[2]],['ICAO',al[1]],['IATA',code]])}</div>`
+         : f.airline ? `<div class="card"><h3>${T('Авиакомпания')}</h3><b>${esc(f.airline)}</b></div>` : ''}
+    <div class="card"><h3 style="margin-bottom:2px">${T('Моя история на маршруте')}</h3><div style="color:var(--muted);font-size:14px;margin-bottom:12px">${f.from} → ${f.to}</div>
+      ${grid([[T('Перелётов'),String(same.length)],[T('Расстояние'),kmShort(rkm)+T(' км')],[T('В воздухе'),hm(rmin)]])}
+      <div class="gfoot" style="margin-top:10px">${same.length ? T('Последний раз: ')+dateShort(lastD||'') : T('Вы ещё не летали этим маршрутом')}</div>
+      ${back.length?`<div class="gfoot">${T('Обратно')} ${f.to} → ${f.from}: ${back.length} ${plural(back.length,'раз','раза','раз')}</div>`:''}</div>
+    <button class="btn" id="fdEdit">${T('✎ Изменить перелёт')}</button>
+    <button class="btn red" id="fdDel">${T('Удалить перелёт')}</button>`;
   m.body.querySelector('#fdEdit').onclick = ()=>{ m.close(); openFlightForm(f); };
-  m.body.querySelector('#fdDel').onclick = ()=>confirmDialog('Удалить этот перелёт?','Удалить',()=>{ m.close(); deleteFlight(f.id); });
+  m.body.querySelector('#fdDel').onclick = ()=>confirmDialog(T('Удалить этот перелёт?'),T('Удалить'),()=>{ m.close(); deleteFlight(f.id); });
 }
 
 // ---------- выбор стран ----------
 const EXTRA_TERR = ['GI','RE','GP','MQ','GF','YT','SJ','CX','CC','TK','BQ','BV','UM'];
 let _allC=null, _allT=null;
-function allCountries(){ return _allC ??= [...SOVEREIGN].filter(cc=>countryName(cc)!==cc).sort((a,b)=>countryName(a).localeCompare(countryName(b),'ru')); }
-function allTerritories(){ return _allT ??= [...new Set([...Object.keys(PARTS), ...EXTRA_TERR])].filter(cc=>!SOVEREIGN.has(cc) && cc!=='AQ' && countryName(cc)!==cc).sort((a,b)=>countryName(a).localeCompare(countryName(b),'ru')); }
-function countryPicker({title, selection, auto=new Set(), note=null, left='Назад', right=null, onChange}){
+function allCountries(){ return _allC ??= [...SOVEREIGN].filter(cc=>countryName(cc)!==cc).sort((a,b)=>countryName(a).localeCompare(countryName(b),LANG)); }
+function allTerritories(){ return _allT ??= [...new Set([...Object.keys(PARTS), ...EXTRA_TERR])].filter(cc=>!SOVEREIGN.has(cc) && cc!=='AQ' && countryName(cc)!==cc).sort((a,b)=>countryName(a).localeCompare(countryName(b),LANG)); }
+function countryPicker({title, selection, auto=new Set(), note=null, left=T('Назад'), right=null, onChange}){
   const m = openModal({title, left, right, cls:'tall'});
-  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="Франция, Мадейра…" autocomplete="off"></div><div id="cpList"></div>`;
+  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="${T('Франция, Мадейра…')}" autocomplete="off"></div><div id="cpList"></div>`;
   const inp = m.body.querySelector('input'), box = m.body.querySelector('#cpList');
   const row = cc=>{ const isAuto=auto.has(cc), on=isAuto||selection.has(cc);
-    return `<button class="gi" data-cc="${cc}"><span style="width:34px;text-align:center">${flagHTML(cc,24)}</span><span style="min-width:0"><div>${esc(countryName(cc))}</div>${isAuto?'<div style="font-size:11px;color:var(--muted)">из перелётов и путешествий</div>':''}${isDisputed(cc)?'<div style="font-size:11px;color:var(--muted)">спорная территория — не засчитывается ни одной стране</div>':''}</span>${on?`<span class="check${isAuto?' auto':''}">✓</span>`:''}</button>`; };
+    return `<button class="gi" data-cc="${cc}"><span style="width:34px;text-align:center">${flagHTML(cc,24)}</span><span style="min-width:0"><div>${esc(countryName(cc))}</div>${isAuto?T('<div style="font-size:11px;color:var(--muted)">из перелётов и путешествий</div>'):''}${isDisputed(cc)?T('<div style="font-size:11px;color:var(--muted)">спорная территория — не засчитывается ни одной стране</div>'):''}</span>${on?`<span class="check${isAuto?' auto':''}">✓</span>`:''}</button>`; };
   function paint(){
     const qv = inp.value.trim().toLowerCase(), match = l=> qv ? l.filter(cc=>countryName(cc).toLowerCase().includes(qv) || cc.toLowerCase()===qv) : l;
-    const chosen = [...new Set([...selection, ...auto])].sort((a,b)=>countryName(a).localeCompare(countryName(b),'ru'));
+    const chosen = [...new Set([...selection, ...auto])].sort((a,b)=>countryName(a).localeCompare(countryName(b),LANG));
     let h='';
     if(note && !qv) h += `<div class="gfoot" style="margin:8px 4px">${esc(note)}</div>`;
-    if(chosen.length && !qv) h += `<div class="ghead">Отмечено: ${chosen.filter(isCountry).length} ${plural(chosen.filter(isCountry).length,'страна','страны','стран')}</div><div class="grp">${chosen.map(row).join('')}</div>`;
-    const cs = match(allCountries()); if(cs.length) h += `<div class="ghead">${qv?'Страны':'Все страны'}</div><div class="grp">${cs.map(row).join('')}</div>`;
-    const ts = match(allTerritories()); if(ts.length) h += `<div class="ghead">Территории и острова</div><div class="grp">${ts.map(row).join('')}</div><div class="gfoot">Закрашиваются на карте отдельно и не входят в счёт стран.</div>`;
+    if(chosen.length && !qv) h += `<div class="ghead">${T('Отмечено:')} ${chosen.filter(isCountry).length} ${plural(chosen.filter(isCountry).length,'страна','страны','стран')}</div><div class="grp">${chosen.map(row).join('')}</div>`;
+    const cs = match(allCountries()); if(cs.length) h += `<div class="ghead">${qv?T('Страны'):T('Все страны')}</div><div class="grp">${cs.map(row).join('')}</div>`;
+    const ts = match(allTerritories()); if(ts.length) h += `<div class="ghead">${T('Территории и острова')}</div><div class="grp">${ts.map(row).join('')}</div><div class="gfoot">${T('Закрашиваются на карте отдельно и не входят в счёт стран.')}</div>`;
     const st = m.body.scrollTop; box.innerHTML = h; m.body.scrollTop = st;
   }
   box.onclick = e=>{ const b=e.target.closest('[data-cc]'); if(!b) return; const cc=b.dataset.cc; if(auto.has(cc)) return;
@@ -1447,28 +1457,28 @@ function countryPicker({title, selection, auto=new Set(), note=null, left='На�
 function openManualPicker(){
   const vm = visitedMap(), auto = new Set(Object.values(vm).filter(v=>v.flights||v.journeys||v.trips).map(v=>v.cc));
   const sel = new Set(manual);
-  countryPicker({title:'Где вы были', selection:sel, auto, left:null, right:'Готово',
-    note:'Отмеченные страны закрашиваются на глобусе. Страны из перелётов, поездок и путешествий отмечены сами.',
+  countryPicker({title:T('Где вы были'), selection:sel, auto, left:null, right:T('Готово'),
+    note:T('Отмеченные страны закрашиваются на глобусе. Страны из перелётов, поездок и путешествий отмечены сами.'),
     onChange: s=>{ manual=[...s].sort(); saveManual(); }});
 }
 
 // ---------- путешествие ----------
 function openJourneyForm(editing){
   const s = { countries:new Set(editing?.countries||[]), start:editing?.start||todayStr(), end:editing?.end||todayStr(), title:editing?.title||'' };
-  const m = openModal({title: editing ? 'Изменить путешествие' : 'Путешествие', right: editing ? 'Сохранить' : 'Добавить', onRight: save});
-  m.body.innerHTML = `<div class="ghead">Страны</div><div class="grp"><button class="gi" id="jfC"></button></div>
-    <div class="ghead">Даты</div><div class="grp"><div class="gi"><span class="lbl">С</span><input type="date" id="jfS" style="text-align:right;color-scheme:dark"></div><div class="gi"><span class="lbl">По</span><input type="date" id="jfE" style="text-align:right;color-scheme:dark"></div></div>
-    <div class="grp" style="margin-top:18px"><div class="gi"><input id="jfT" placeholder="Название (необязательно), напр. Альпы на машине"></div></div><div class="gfoot" id="jfF"></div>`;
+  const m = openModal({title: editing ? T('Изменить путешествие') : T('Путешествие'), right: editing ? T('Сохранить') : T('Добавить'), onRight: save});
+  m.body.innerHTML = `<div class="ghead">${T('Страны')}</div><div class="grp"><button class="gi" id="jfC"></button></div>
+    <div class="ghead">${T('Даты')}</div><div class="grp"><div class="gi"><span class="lbl">${T('С')}</span><input type="date" id="jfS" style="text-align:right;color-scheme:dark"></div><div class="gi"><span class="lbl">${T('По')}</span><input type="date" id="jfE" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="grp" style="margin-top:18px"><div class="gi"><input id="jfT" placeholder="${T('Название (необязательно), напр. Альпы на машине')}"></div></div><div class="gfoot" id="jfF"></div>`;
   const q = x=>m.body.querySelector(x);
   q('#jfS').value=s.start; q('#jfE').value=s.end; q('#jfT').value=s.title;
   const draft = ()=>({ id: editing?.id ?? Date.now(), countries:[...s.countries].sort(), start:s.start, end: s.end < s.start ? s.start : s.end, title:s.title.trim() });
   function paint(){
-    q('#jfC').innerHTML = s.countries.size ? `<span style="line-height:1.5">${[...s.countries].sort().map(cc=>`${flagHTML(cc,16)} ${esc(countryName(cc))}`).join(', ')}</span>` : '<span style="color:var(--muted)">Выбрать страны</span>';
+    q('#jfC').innerHTML = s.countries.size ? `<span style="line-height:1.5">${[...s.countries].sort().map(cc=>`${flagHTML(cc,16)} ${esc(countryName(cc))}`).join(', ')}</span>` : T('<span style="color:var(--muted)">Выбрать страны</span>');
     const d=draft(), n=journeyArcs(d).length, t=journeyTrips(d).length;
-    q('#jfF').innerHTML = n+t ? `<span style="color:var(--accent2)">Подтянется за эти даты: перелётов ${n}, наземных поездок ${t}</span>` : 'Перелётов и поездок за эти даты пока нет';
+    q('#jfF').innerHTML = n+t ? `<span style="color:var(--accent2)">${T('Подтянется за эти даты: перелётов')} ${n}${T(', наземных поездок')} ${t}</span>` : T('Перелётов и поездок за эти даты пока нет');
     m.setRight(s.countries.size>0);
   }
-  q('#jfC').onclick = ()=>countryPicker({title:'Страны путешествия', selection:s.countries, onChange:paint});
+  q('#jfC').onclick = ()=>countryPicker({title:T('Страны путешествия'), selection:s.countries, onChange:paint});
   q('#jfS').onchange = e=>{ s.start=e.target.value||todayStr(); if(s.end<s.start){ s.end=s.start; q('#jfE').value=s.end; } paint(); };
   q('#jfE').onchange = e=>{ s.end=e.target.value||s.start; paint(); };
   q('#jfT').oninput = e=>{ s.title=e.target.value; };
@@ -1500,16 +1510,16 @@ async function geoSearch(q, signal){
   }
 }
 function pickPlace(cb){
-  const m = openModal({title:'Город или место', left:'Назад'});
-  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="Прага, Брно…" autocomplete="off"></div><div class="grp" id="ppRes" hidden></div><div class="empty" id="ppHint">Город, вокзал или место</div>`;
+  const m = openModal({title:T('Город или место'), left:T('Назад')});
+  m.body.innerHTML = `<div class="search">${ICON.search}<input placeholder="${T('Прага, Брно…')}" autocomplete="off"></div><div class="grp" id="ppRes" hidden></div><div class="empty" id="ppHint">${T('Город, вокзал или место')}</div>`;
   const inp=m.body.querySelector('input'), res=m.body.querySelector('#ppRes'), hint=m.body.querySelector('#ppHint');
   let timer=null, ctrl=null, items=[];
-  inp.oninput = ()=>{ clearTimeout(timer); const q=inp.value.trim(); if(q.length<2){ res.hidden=true; hint.hidden=false; hint.textContent='Город, вокзал или место'; return; }
-    timer=setTimeout(async ()=>{ ctrl?.abort(); ctrl=new AbortController(); hint.hidden=false; hint.textContent='Ищу…';
+  inp.oninput = ()=>{ clearTimeout(timer); const q=inp.value.trim(); if(q.length<2){ res.hidden=true; hint.hidden=false; hint.textContent=T('Город, вокзал или место'); return; }
+    timer=setTimeout(async ()=>{ ctrl?.abort(); ctrl=new AbortController(); hint.hidden=false; hint.textContent=T('Ищу…');
       try{ items = await geoSearch(q, ctrl.signal);
         res.innerHTML = items.map((p,i)=>`<button class="gi" data-i="${i}"><span style="min-width:0"><div>${flagEmoji(p.cc)} ${esc(p.name)}</div><div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.sub)}</div></span></button>`).join('');
-        res.hidden=!items.length; hint.hidden=!!items.length; hint.textContent='Ничего не найдено';
-      }catch(e){ if(e.name!=='AbortError'){ hint.textContent='Поиск недоступен — проверьте интернет'; } } }, 300); };
+        res.hidden=!items.length; hint.hidden=!!items.length; hint.textContent=T('Ничего не найдено');
+      }catch(e){ if(e.name!=='AbortError'){ hint.textContent=T('Поиск недоступен — проверьте интернет'); } } }, 300); };
   res.onclick = e=>{ const b=e.target.closest('[data-i]'); if(!b) return; const p=items[+b.dataset.i]; m.close();
     cb({name:p.name, sub:p.sub, lat:+p.lat.toFixed(5), lon:+p.lon.toFixed(5), cc:p.cc}); };
   setTimeout(()=>inp.focus(), 50);
@@ -1517,19 +1527,19 @@ function pickPlace(cb){
 function openTripForm(editing){
   const first = editing?.[0];
   const s = { mode:first?.mode||'bus', stops: editing ? [first.from, ...editing.map(l=>l.to)] : [null,null], hasDate: editing ? !!first.date : true, date:first?.date||todayStr(), note:first?.note||'' };
-  const m = openModal({title: editing ? 'Изменить поездку' : 'Наземная поездка', right: editing ? 'Сохранить' : 'Добавить', onRight: save});
+  const m = openModal({title: editing ? T('Изменить поездку') : T('Наземная поездка'), right: editing ? T('Сохранить') : T('Добавить'), onRight: save});
   m.body.innerHTML = `<div class="seg" id="tfMode">${Object.entries(MODES).map(([k,v])=>`<button data-m="${k}">${v.ico} ${v.name}</button>`).join('')}</div>
-    <div class="ghead">Маршрут</div><div class="grp" id="tfStops"></div><div class="gfoot">Линий на карте не будет — страны по пути отметятся посещёнными.</div>
-    <div class="grp"><div class="gi"><span>Дата</span><span class="toggle" id="tfDT"></span></div><div class="gi" id="tfDR"><span class="lbl">Дата</span><input type="date" id="tfD" style="text-align:right;color-scheme:dark"></div><div class="gi"><input id="tfN" placeholder="Заметка (необязательно)"></div></div>
-    ${editing?'<div class="grp"><button class="gi danger" id="tfDel">Удалить поездку</button></div>':''}`;
+    <div class="ghead">${T('Маршрут')}</div><div class="grp" id="tfStops"></div><div class="gfoot">${T('Линий на карте не будет — страны по пути отметятся посещёнными.')}</div>
+    <div class="grp"><div class="gi"><span>${T('Дата')}</span><span class="toggle" id="tfDT"></span></div><div class="gi" id="tfDR"><span class="lbl">${T('Дата')}</span><input type="date" id="tfD" style="text-align:right;color-scheme:dark"></div><div class="gi"><input id="tfN" placeholder="${T('Заметка (необязательно)')}"></div></div>
+    ${editing?T('<div class="grp"><button class="gi danger" id="tfDel">Удалить поездку</button></div>'):''}`;
   const q = x=>m.body.querySelector(x);
   q('#tfD').value=s.date; q('#tfN').value=s.note;
   function paint(){
     q('#tfMode').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.m===s.mode));
     const n=s.stops.length;
     q('#tfStops').innerHTML = s.stops.map((p,i)=>`<div class="gi" style="padding-right:8px"><span style="color:var(--accent2);width:16px;text-align:center">${i===0?'○':i===n-1?'◉':'●'}</span>
-      <button data-pick="${i}" style="flex:1;text-align:left;min-width:0">${p ? `<div>${flagEmoji(p.cc)} ${esc(p.name)}</div>${p.sub?`<div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.sub)}</div>`:''}` : `<span style="color:var(--muted)">${i===0?'Откуда':i===n-1?'Куда':'Через город'}</span>`}</button>
-      ${n>2?`<button class="xbtn" data-rm="${i}">${ICON.x}</button>`:''}</div>`).join('') + `<button class="gi link" id="tfAdd">＋ Добавить город</button>`;
+      <button data-pick="${i}" style="flex:1;text-align:left;min-width:0">${p ? `<div>${flagEmoji(p.cc)} ${esc(p.name)}</div>${p.sub?`<div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.sub)}</div>`:''}` : `<span style="color:var(--muted)">${i===0?T('Откуда'):i===n-1?T('Куда'):T('Через город')}</span>`}</button>
+      ${n>2?`<button class="xbtn" data-rm="${i}">${ICON.x}</button>`:''}</div>`).join('') + `<button class="gi link" id="tfAdd">${T('＋ Добавить город')}</button>`;
     q('#tfDT').classList.toggle('on', s.hasDate); q('#tfDR').hidden=!s.hasDate;
     m.setRight(s.stops.length>=2 && s.stops.every(Boolean));
   }
@@ -1543,7 +1553,7 @@ function openTripForm(editing){
   q('#tfDT').parentElement.onclick = ()=>{ s.hasDate=!s.hasDate; paint(); };
   q('#tfD').onchange = e=>{ s.date=e.target.value||todayStr(); };
   q('#tfN').oninput = e=>{ s.note=e.target.value; };
-  if(editing) q('#tfDel').onclick = ()=>confirmDialog('Удалить эту поездку?','Удалить',()=>{ m.close(); deleteTrip(editing); });
+  if(editing) q('#tfDel').onclick = ()=>confirmDialog(T('Удалить эту поездку?'),T('Удалить'),()=>{ m.close(); deleteTrip(editing); });
   function save(){
     const pts=s.stops, base = first?.id ?? Date.now(), group = pts.length>2 ? base : undefined, d = s.hasDate ? s.date : '';
     const legs = pts.slice(0,-1).map((p,i)=>{ const t={ id:base+i, mode:s.mode, from:pts[i], to:pts[i+1], date:d, note:s.note.trim(), km:Math.round(dist(pts[i],pts[i+1])) }; if(group!=null) t.group=group; return t; });
@@ -1555,67 +1565,70 @@ function openTripForm(editing){
 
 // ---------- профиль ----------
 function openProfile(){
-  const m = openModal({title:'Профиль', left:null, right:'Готово', cls:'tall'});
+  const m = openModal({title:T('Профиль'), left:null, right:T('Готово'), cls:'tall'});
   const done = doneArcs(), km = done.reduce((s,a)=>s+a.km,0), cc = Object.keys(visitedMap()).filter(isCountry).length;
   const step = (n,t)=>`<li>${t}</li>`;
   m.body.innerHTML = `
     <div style="text-align:center;padding:10px 0 4px"><div style="width:78px;height:78px;border-radius:50%;background:var(--accent);color:var(--ink);display:grid;place-items:center;margin:0 auto 10px">${ICON.user.replace('<svg','<svg width="34" height="34"')}</div>
       <div style="font-size:22px;font-weight:700">Diary Travel</div>
-      <div style="color:var(--muted);font-size:14px;margin-top:4px">${done.length} ${plural(done.length,'перелёт','перелёта','перелётов')} · ${kmShort(km)} км · ${cc} ${plural(cc,'страна','страны','стран')}</div></div>
-    <div class="ghead">Расписание рейсов</div>
-    <div class="grp"><div class="gi"><input id="pfKey" type="password" placeholder="Ключ X-RapidAPI-Key" autocomplete="off" spellcheck="false"><button class="xbtn" id="pfEye" title="Показать" style="font-size:13px">👁</button></div>
-      <div class="gi ok" id="pfOk">✓ Поиск рейсов включён</div>
-      <details class="how"><summary>Где взять ключ?</summary><ol>
-        ${step(1,'Откройте rapidapi.com и зарегистрируйтесь (можно через Google).')}
-        ${step(2,'В поиске найдите AeroDataBox и откройте его страницу.')}
-        ${step(3,'Вкладка Pricing → план Basic ($0) → Subscribe.')}
-        ${step(4,'Вкладка Endpoints (Playground): справа в блоке заголовков скопируйте значение X-RapidAPI-Key — длинную строку из букв и цифр.')}
-        ${step(5,'Вставьте её в поле выше. Готово — при добавлении перелёта появится «Найти рейсы».')}
-        <li style="list-style:none;margin-left:-20px"><a href="https://rapidapi.com/aedbx-aedbx/api/aerodatabox" target="_blank" rel="noopener" style="color:var(--accent)">↗ Открыть AeroDataBox на RapidAPI</a></li>
-        <li style="list-style:none;margin-left:-20px;color:var(--muted);font-size:12.5px">Бесплатно: 400 единиц в месяц. Поиск по маршруту — 4, по номеру — 2. Данные за последний год и на год вперёд.</li>
+      <div style="color:var(--muted);font-size:14px;margin-top:4px">${done.length} ${plural(done.length,'перелёт','перелёта','перелётов')} · ${kmShort(km)} ${T('км ·')} ${cc} ${plural(cc,'страна','страны','стран')}</div></div>
+    <div class="ghead">${T('Расписание рейсов')}</div>
+    <div class="grp"><div class="gi"><input id="pfKey" type="password" placeholder="${T('Ключ X-RapidAPI-Key')}" autocomplete="off" spellcheck="false"><button class="xbtn" id="pfEye" title="${T('Показать')}" style="font-size:13px">👁</button></div>
+      <div class="gi ok" id="pfOk">${T('✓ Поиск рейсов включён')}</div>
+      <details class="how"><summary>${T('Где взять ключ?')}</summary><ol>
+        ${step(1,T('Откройте rapidapi.com и зарегистрируйтесь (можно через Google).'))}
+        ${step(2,T('В поиске найдите AeroDataBox и откройте его страницу.'))}
+        ${step(3,T('Вкладка Pricing → план Basic ($0) → Subscribe.'))}
+        ${step(4,T('Вкладка Endpoints (Playground): справа в блоке заголовков скопируйте значение X-RapidAPI-Key — длинную строку из букв и цифр.'))}
+        ${step(5,T('Вставьте её в поле выше. Готово — при добавлении перелёта появится «Найти рейсы».'))}
+        <li style="list-style:none;margin-left:-20px"><a href="https://rapidapi.com/aedbx-aedbx/api/aerodatabox" target="_blank" rel="noopener" style="color:var(--accent)">${T('↗ Открыть AeroDataBox на RapidAPI')}</a></li>
+        <li style="list-style:none;margin-left:-20px;color:var(--muted);font-size:12.5px">${T('Бесплатно: 400 единиц в месяц. Поиск по маршруту — 4, по номеру — 2. Данные за последний год и на год вперёд.')}</li>
       </ol></details></div>
-    <div class="gfoot">С ключом при добавлении перелёта можно найти рейсы по маршруту и дате или подтянуть данные по номеру: время, самолёт, борт. Ключ хранится только в этом браузере.</div>
-    <div class="ghead">Где я живу</div>
+    <div class="gfoot">${T('С ключом при добавлении перелёта можно найти рейсы по маршруту и дате или подтянуть данные по номеру: время, самолёт, борт. Ключ хранится только в этом браузере.')}</div>
+    <div class="ghead">${T('Где я живу')}</div>
     <div class="grp" id="pfHomes"></div>
-    <div class="gfoot">Пока вы живёте в городе, он не считается путешествием: не попадает в топ городов и стран. Перелёты и поездки отсюда остаются.</div>
-    <div class="ghead">Данные</div>
-    <div class="grp"><button class="gi link" id="pfImp">⬇︎ Импорт из файла</button><button class="gi link" id="pfExp">⬆︎ Экспорт (сохранить копию)</button></div>
-    <div class="gfoot">Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны и города, места жительства и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.</div>
-    <div class="grp" style="margin-top:18px"><button class="gi danger" id="pfClr">Удалить все данные</button></div>
+    <div class="gfoot">${T('Пока вы живёте в городе, он не считается путешествием: не попадает в топ городов и стран. Перелёты и поездки отсюда остаются.')}</div>
+    <div class="ghead">${T('Язык')}${LANG==='en'?'':' · Language'}</div>
+    <div class="grp"><label class="gi"><span>🌐</span><select id="pfLang" style="text-align:left;color:var(--text)">${LANG_LIST.map(([c,n])=>`<option value="${c}" ${c===LANG_PREF?'selected':''}>${n}</option>`).join('')}</select></label></div>
+    <div class="ghead">${T('Данные')}</div>
+    <div class="grp"><button class="gi link" id="pfImp">${T('⬇︎ Импорт из файла')}</button><button class="gi link" id="pfExp">${T('⬆︎ Экспорт (сохранить копию)')}</button></div>
+    <div class="gfoot">${T('Тот же формат, что в приложении на iPhone: перелёты, путешествия, наземные поездки, отмеченные страны и города, места жительства и ключ AeroDataBox. Файл можно перенести между сайтом и приложением. Не отправляйте его посторонним: в нём ваш ключ.')}</div>
+    <div class="grp" style="margin-top:18px"><button class="gi danger" id="pfClr">${T('Удалить все данные')}</button></div>
     <input type="file" id="pfFile" accept=".json,application/json" hidden>`;
   const q = x=>m.body.querySelector(x), key=q('#pfKey');
   key.value = API.key; const paintKey=()=>{ q('#pfOk').hidden = !key.value.trim(); }; paintKey();
   key.oninput = ()=>{ lsSet(API.keyName, key.value.trim()); paintKey(); };
   q('#pfEye').onclick = ()=>{ key.type = key.type==='password' ? 'text' : 'password'; };
   q('#pfExp').onclick = exportData;
+  q('#pfLang').onchange = e=>{ setLangPref(e.target.value); location.reload(); };
   const paintHomes = ()=>{
     const box = q('#pfHomes'), hs = [...homes].sort((a,b)=>(b.from||'').localeCompare(a.from||''));
     box.innerHTML = hs.map(h=>`<button class="gi" data-h="${h.id}"><span style="font-size:20px">🏠</span><span style="min-width:0"><div>${flagEmoji(h.cc)} ${esc(h.name)}</div>
-      <div style="font-size:12px;color:var(--muted)">${h.from?'с '+fmtDate(h.from):'всегда'}${h.to?' по '+fmtDate(h.to):' — сейчас'}</div></span><span style="margin-left:auto;color:#555">›</span></button>`).join('')
-      + `<button class="gi link" data-h="new">＋ Добавить место жительства</button>`;
+      <div style="font-size:12px;color:var(--muted)">${h.from?T('с ')+fmtDate(h.from):T('всегда')}${h.to?T(' по ')+fmtDate(h.to):T(' — сейчас')}</div></span><span style="margin-left:auto;color:#555">›</span></button>`).join('')
+      + `<button class="gi link" data-h="new">${T('＋ Добавить место жительства')}</button>`;
     box.onclick = e=>{ const b=e.target.closest('[data-h]'); if(b) openHomeForm(b.dataset.h==='new' ? null : homes.find(h=>String(h.id)===b.dataset.h), paintHomes); };
   };
   paintHomes();
   q('#pfImp').onclick = ()=>q('#pfFile').click();
   q('#pfFile').onchange = async e=>{ const file=e.target.files[0]; e.target.value=''; if(!file) return;
-    let r; try{ r = parseImport(JSON.parse(await file.text())); }catch(err){ return alertDialog('Не удалось прочитать файл', ''); }
-    const sum = `Перелётов: ${r.flights.length}, путешествий: ${r.journeys.length}, наземных поездок: ${r.trips.length}, стран вручную: ${r.manual.length}`;
-    if(!flights.length && !journeys.length && !manual.length && !trips.length){ applyImport(r,true); m.close(); alertDialog('Импортировано', sum); }
-    else dialog({title:sum, buttons:[{label:'Заменить текущие', danger:true, act:()=>{ applyImport(r,true); m.close(); toast('Данные заменены'); }},
-                                      {label:'Добавить к текущим', bold:true, act:()=>{ applyImport(r,false); m.close(); toast('Данные добавлены'); }}]});
+    let r; try{ r = parseImport(JSON.parse(await file.text())); }catch(err){ return alertDialog(T('Не удалось прочитать файл'), ''); }
+    const sum = `${T('Перелётов:')} ${r.flights.length}${T(', путешествий:')} ${r.journeys.length}${T(', наземных поездок:')} ${r.trips.length}${T(', стран вручную:')} ${r.manual.length}`;
+    if(!flights.length && !journeys.length && !manual.length && !trips.length){ applyImport(r,true); m.close(); alertDialog(T('Импортировано'), sum); }
+    else dialog({title:sum, buttons:[{label:T('Заменить текущие'), danger:true, act:()=>{ applyImport(r,true); m.close(); toast(T('Данные заменены')); }},
+                                      {label:T('Добавить к текущим'), bold:true, act:()=>{ applyImport(r,false); m.close(); toast(T('Данные добавлены')); }}]});
   };
-  q('#pfClr').onclick = ()=>confirmDialog('Удалить все перелёты, путешествия и отметки?','Удалить всё',()=>{ flights=[]; journeys=[]; manual=[]; trips=[]; selected=selJourney=selCountry=null;
-    saveJ('flights.v1',[]); saveJ('journeys.v1',[]); saveJ('countries.v1',[]); saveJ('trips.v1',[]); mcities=[]; saveJ('cities.v1',[]); m.close(); refresh(); }, 'Совет: сначала сделайте экспорт.');
+  q('#pfClr').onclick = ()=>confirmDialog(T('Удалить все перелёты, путешествия и отметки?'),T('Удалить всё'),()=>{ flights=[]; journeys=[]; manual=[]; trips=[]; selected=selJourney=selCountry=null;
+    saveJ('flights.v1',[]); saveJ('journeys.v1',[]); saveJ('countries.v1',[]); saveJ('trips.v1',[]); mcities=[]; saveJ('cities.v1',[]); m.close(); refresh(); }, T('Совет: сначала сделайте экспорт.'));
 }
 function openCityForm(){
   const s = { place:null, hasDate:false, date:todayStr() };
-  const m = openModal({title:'Отметить город', right:'Добавить', onRight: save});
+  const m = openModal({title:T('Отметить город'), right:T('Добавить'), onRight: save});
   m.body.innerHTML = `<div class="grp"><button class="gi" id="cfP"></button></div>
-    <div class="grp"><div class="gi"><span>Дата визита</span><span class="toggle" id="cfT"></span></div><div class="gi" id="cfR"><span class="lbl">Дата</span><input type="date" id="cfD" style="text-align:right;color-scheme:dark"></div></div>
-    <div class="gfoot">Для городов, куда вы попали не самолётом и не записанной поездкой. Страна города тоже отметится посещённой.</div>`;
+    <div class="grp"><div class="gi"><span>${T('Дата визита')}</span><span class="toggle" id="cfT"></span></div><div class="gi" id="cfR"><span class="lbl">${T('Дата')}</span><input type="date" id="cfD" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="gfoot">${T('Для городов, куда вы попали не самолётом и не записанной поездкой. Страна города тоже отметится посещённой.')}</div>`;
   const q = x=>m.body.querySelector(x); q('#cfD').value = s.date;
   function paint(){
-    q('#cfP').innerHTML = s.place ? `<span style="min-width:0"><div>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</div><div style="font-size:12px;color:var(--muted)">${esc(s.place.sub||'')}</div></span>` : '<span style="color:var(--muted)">Выбрать город</span>';
+    q('#cfP').innerHTML = s.place ? `<span style="min-width:0"><div>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</div><div style="font-size:12px;color:var(--muted)">${esc(s.place.sub||'')}</div></span>` : T('<span style="color:var(--muted)">Выбрать город</span>');
     q('#cfT').classList.toggle('on', s.hasDate); q('#cfR').hidden = !s.hasDate; m.setRight(!!s.place);
   }
   q('#cfP').onclick = ()=>pickPlace(p=>{ s.place=p; paint(); });
@@ -1630,16 +1643,16 @@ function openCityForm(){
 function openHomeForm(editing, done){
   const s = { place: editing ? {name:editing.name, cc:editing.cc, lat:editing.lat, lon:editing.lon, sub:editing.sub||''} : null,
     from: editing?.from || '', hasTo: !!editing?.to, to: editing?.to || todayStr() };
-  const m = openModal({title: editing ? 'Место жительства' : 'Где я живу', right: editing ? 'Сохранить' : 'Добавить', onRight: save});
-  m.body.innerHTML = `<div class="ghead">Город</div><div class="grp"><button class="gi" id="hfP"></button></div>
-    <div class="ghead">Когда</div><div class="grp"><div class="gi"><span class="lbl">Живу с</span><input type="date" id="hfF" style="text-align:right;color-scheme:dark"></div>
-      <div class="gi"><span>Уже переехал</span><span class="toggle" id="hfT"></span></div><div class="gi" id="hfTR"><span class="lbl">Жил по</span><input type="date" id="hfTo" style="text-align:right;color-scheme:dark"></div></div>
-    <div class="gfoot">Если дату «с» не указать, город считается домом всегда. Можно добавить несколько мест — например, где жили раньше.</div>
-    ${editing ? '<div class="grp"><button class="gi danger" id="hfDel">Удалить</button></div>' : ''}`;
+  const m = openModal({title: editing ? T('Место жительства') : T('Где я живу'), right: editing ? T('Сохранить') : T('Добавить'), onRight: save});
+  m.body.innerHTML = `<div class="ghead">${T('Город')}</div><div class="grp"><button class="gi" id="hfP"></button></div>
+    <div class="ghead">${T('Когда')}</div><div class="grp"><div class="gi"><span class="lbl">${T('Живу с')}</span><input type="date" id="hfF" style="text-align:right;color-scheme:dark"></div>
+      <div class="gi"><span>${T('Уже переехал')}</span><span class="toggle" id="hfT"></span></div><div class="gi" id="hfTR"><span class="lbl">${T('Жил по')}</span><input type="date" id="hfTo" style="text-align:right;color-scheme:dark"></div></div>
+    <div class="gfoot">${T('Если дату «с» не указать, город считается домом всегда. Можно добавить несколько мест — например, где жили раньше.')}</div>
+    ${editing ? T('<div class="grp"><button class="gi danger" id="hfDel">Удалить</button></div>') : ''}`;
   const q = x=>m.body.querySelector(x);
   q('#hfF').value = s.from; q('#hfTo').value = s.to;
   function paint(){
-    q('#hfP').innerHTML = s.place ? `<span>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</span>` : '<span style="color:var(--muted)">Выбрать город</span>';
+    q('#hfP').innerHTML = s.place ? `<span>${flagEmoji(s.place.cc)} ${esc(s.place.name)}</span>` : T('<span style="color:var(--muted)">Выбрать город</span>');
     q('#hfT').classList.toggle('on', s.hasTo); q('#hfTR').hidden = !s.hasTo; m.setRight(!!s.place);
   }
   q('#hfP').onclick = ()=>pickPlace(p=>{ s.place=p; paint(); });
@@ -1733,7 +1746,7 @@ const AircraftNames = (()=>{
     if(k.startsWith('CRJ')) return 'Bombardier '+s;
     return s;
   }
-  const maker = f => MAKERS.find(m=>f.startsWith(m)) || 'Другие';
+  const maker = f => MAKERS.find(m=>f.startsWith(m)) || T('Другие');
   const isWidebody = f => ['787','777','767','747','A330','A340','A350','A380','A300','A310'].some(x=>f.includes(x));
   /** картинка самолёта planes/plane_*.png; если файла нет — картинка просто скрывается */
   function image(f){
@@ -1766,7 +1779,7 @@ function computeStats(period){
     const mins = arcMin(a); S.km+=a.km; S.minutes+=mins;
     for(const p of [a.a,a.b]){ inc(ap,p.iata,p.iata); if(!S.countries.includes(p.country)) S.countries.push(p.country); }
     a.a.country===a.b.country ? S.domestic++ : S.international++;
-    const code=airlineCode(a.f), name=airlineName(a.f)||'Не указана'; inc(al, code||name, name, a.km);
+    const code=airlineCode(a.f), name=airlineName(a.f)||T('Не указана'); inc(al, code||name, name, a.km);
     const full=AircraftNames.full(a.f.aircraft);
     if(!full) S.noAircraft++; else { inc(ac, full, full, mins); const mm=AircraftNames.maker(full); inc(mk, mm, mm); }
     const pair=[a.a.iata,a.b.iata].sort(), rk=pair.join('-'); (rt[rk] ??= {key:rk,label:`${pair[0]} ⇄ ${pair[1]}`,n:0,extra:a.km}).n++;
@@ -1782,11 +1795,11 @@ function computeStats(period){
   S.airports=ranked(ap); S.airlines=ranked(al); S.aircraft=ranked(ac); S.makers=ranked(mk); S.routes=ranked(rt);
   S.longest = arcs.reduce((b,a)=>!b||a.km>b.km?a:b, null); S.shortest = arcs.reduce((b,a)=>!b||a.km<b.km?a:b, null);
   S.perYear = Object.keys(y).sort().map(k=>({label:k, n:y[k].n, extra:y[k].km}));
-  S.perMonth = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'].map((l,i)=>({label:l,n:m[i]}));
-  S.weekday = ['пн','вт','ср','чт','пт','сб','вс'].map((l,i)=>({label:l,n:wd[i]}));
+  S.perMonth = MONTHS_SHORT.map((l,i)=>({label:l,n:m[i]}));
+  S.weekday = [T('пн'),T('вт'),T('ср'),T('чт'),T('пт'),T('сб'),T('вс')].map((l,i)=>({label:l,n:wd[i]}));
   S.hours = hr.reduce((a,b)=>a+b,0) >= 3 ? hr.map((n,i)=>({label:String(i).padStart(2,'0'), n})) : [];
-  S.cabins = [['E','Эконом'],['P','Премиум'],['B','Бизнес'],['F','Первый']].map(([k,l])=>({key:k,label:l,n:cab[k]||0}));
-  S.seatTypes = [['window','Окно','🪟'],['middle','Середина','👥'],['aisle','Проход','🚶']].map(([k,l,i])=>({key:k,label:l,ico:i,n:st[k]||0}));
+  S.cabins = [['E',T('Эконом')],['P',T('Премиум')],['B',T('Бизнес')],['F',T('Первый')]].map(([k,l])=>({key:k,label:l,n:cab[k]||0}));
+  S.seatTypes = [['window',T('Окно'),'🪟'],['middle',T('Середина'),'👥'],['aisle',T('Проход'),'🚶']].map(([k,l,i])=>({key:k,label:l,ico:i,n:st[k]||0}));
   const fav = Object.entries(sc).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))[0]; S.favoriteSeat = fav || null;
   const first={}; for(const a of all) if(a.f.date) for(const p of [a.a,a.b]) if(!first[p.country] || a.f.date<first[p.country]) first[p.country]=a.f.date;
   const ny={}; for(const d of Object.values(first)) ny[d.slice(0,4)]=(ny[d.slice(0,4)]||0)+1;
@@ -1830,57 +1843,57 @@ function donut(parts, size=110){
 const PALETTE = ['#ffb347','#5ad1ff','#3ddc84','#c792ea','#ff7b72','#f2cc60','#8a93a8'];
 
 function statsHTML(S, period){
-  if(!S.arcs.length && !S.trips.length) return `<div class="empty"><div class="ico">📊</div>За этот период перелётов нет</div>`;
+  if(!S.arcs.length && !S.trips.length) return `<div class="empty"><div class="ico">📊</div>${T('За этот период перелётов нет')}</div>`;
   let h='';
-  const alN = S.airlines.filter(c=>c.label!=='Не указана').length;
-  h += card('Обзор','✨', `<div class="big">${bigv(S.arcs.length, plural(S.arcs.length,'перелёт','перелёта','перелётов'))}${bigv(kmShort(S.km),'километров')}${bigv(hm(S.minutes),'в воздухе')}${bigv(S.airports.length,'аэропортов')}
-    ${bigv(S.countries.length, plural(S.countries.length,'страна','страны','стран')+' перелётами')}${bigv(alN,'авиакомпаний')}${bigv(S.aircraft.length,'типов самолётов')}${bigv(S.arcs.length?fmtKm(S.km/S.arcs.length)+' км':'—','средний перелёт')}</div>`);
+  const alN = S.airlines.filter(c=>c.label!==T('Не указана')).length;
+  h += card(T('Обзор'),'✨', `<div class="big">${bigv(S.arcs.length, plural(S.arcs.length,'перелёт','перелёта','перелётов'))}${bigv(kmShort(S.km),T('километров'))}${bigv(hm(S.minutes),T('в воздухе'))}${bigv(S.airports.length,T('аэропортов'))}
+    ${bigv(S.countries.length, plural(S.countries.length,'страна','страны','стран')+T(' перелётами'))}${bigv(alN,T('авиакомпаний'))}${bigv(S.aircraft.length,T('типов самолётов'))}${bigv(S.arcs.length?fmtKm(S.km/S.arcs.length)+T(' км'):'—',T('средний перелёт'))}</div>`);
   const earth=S.km/40075, moon=S.km/384400;
-  h += card('Вокруг Земли и до Луны','🌍', `<div style="font-size:22px;font-weight:700">${earth.toFixed(2)}× вокруг экватора</div>${lapBar(earth,'blue')}
-    <div style="font-size:22px;font-weight:700;margin-top:6px">${moon<1 ? (moon*100).toFixed(1)+'% пути до Луны' : moon.toFixed(2)+'× до Луны'}</div>${lapBar(moon,'orange')}`);
+  h += card(T('Вокруг Земли и до Луны'),'🌍', `<div style="font-size:22px;font-weight:700">${earth.toFixed(2)}${T('× вокруг экватора')}</div>${lapBar(earth,'blue')}
+    <div style="font-size:22px;font-weight:700;margin-top:6px">${moon<1 ? (moon*100).toFixed(1)+T('% пути до Луны') : moon.toFixed(2)+T('× до Луны')}</div>${lapBar(moon,'orange')}`);
   if(period==='all' && S.perYear.length>1)
-    h += card('По годам','📅', `<div class="sub-t">Перелёты, шт.</div>` + vbars(S.perYear) + `<div class="sub-t" style="margin-top:18px">Километры</div>` + lineChart(S.perYear));
-  h += card(period==='all'?'Сезонность':'По месяцам','📊', vbars(S.perMonth,{cls:'blue'}));
+    h += card(T('По годам'),'📅', `<div class="sub-t">${T('Перелёты, шт.')}</div>` + vbars(S.perYear) + `<div class="sub-t" style="margin-top:18px">${T('Километры')}</div>` + lineChart(S.perYear));
+  h += card(period==='all'?T('Сезонность'):T('По месяцам'),'📊', vbars(S.perMonth,{cls:'blue'}));
   const topWd = S.weekday.reduce((b,c)=>c.n>b.n?c:b, S.weekday[0]);
-  h += card('Дни недели','🗓', vbars(S.weekday,{cls:'blue', hi:c=>c.label==='сб'||c.label==='вс'}) + (topWd.n?`<div class="gfoot">Чаще всего летаете: ${topWd.label}</div>`:''));
-  if(S.hours.length) h += card('Время вылета','🕐', `<div style="--h:130px">${vbars(S.hours,{cls:'blue', every:6})}</div>`);
+  h += card(T('Дни недели'),'🗓', vbars(S.weekday,{cls:'blue', hi:c=>c.label===T('сб')||c.label===T('вс')}) + (topWd.n?`<div class="gfoot">${T('Чаще всего летаете:')} ${topWd.label}</div>`:''));
+  if(S.hours.length) h += card(T('Время вылета'),'🕐', `<div style="--h:130px">${vbars(S.hours,{cls:'blue', every:6})}</div>`);
   // самолёты
   let ac='';
   if(S.aircraft.length){
     const top=S.aircraft[0];
-    ac += planeImg(top.label,'plane hero') + `<div style="color:var(--muted);font-size:12px">Чаще всего</div><div style="font-size:28px;font-weight:800;line-height:1.15">${esc(top.label)}</div>
+    ac += planeImg(top.label,'plane hero') + `<div style="color:var(--muted);font-size:12px">${T('Чаще всего')}</div><div style="font-size:28px;font-weight:800;line-height:1.15">${esc(top.label)}</div>
       <div style="color:var(--accent2);font-size:14px;margin-bottom:6px">${top.n} ${plural(top.n,'перелёт','перелёта','перелётов')} · ${hm(Math.round(top.extra))}</div>`;
     ac += S.aircraft.slice(0,8).map(c=>hbar(c.label, c.n, top.n, {sub:hm(Math.round(c.extra)), lead:planeImg(c.label,'plane mini')})).join('');
     if(S.makers.length>1){ const tot=S.makers.reduce((s,c)=>s+c.n,0), ps=S.makers.map((c,i)=>({...c,color:PALETTE[i%PALETTE.length]}));
       ac += `<div class="donut" style="margin-top:12px">${donut(ps)}<ul>${ps.map(c=>`<li><i style="background:${c.color}"></i>${esc(c.label)} — ${Math.round(c.n/tot*100)}%</li>`).join('')}</ul></div>`; }
-  } else ac += `<div style="color:var(--muted);font-size:14px">Тип самолёта пока не указан ни у одного перелёта.</div>`;
-  if(S.noAircraft) ac += `<div class="gfoot" style="margin-top:8px">Без типа самолёта: ${S.noAircraft}. Добавьте через «Изменить» или «Подтянуть данные».</div>`;
-  h += card('Самолёты','✈︎', ac);
-  h += card('Авиакомпании','🏢', S.airlines.slice(0,8).map(c=>hbar(c.label, c.n, S.airlines[0].n, {sub:kmShort(c.extra)+' км', color: c.key.length===2 ? `rgb(${brandRGB(c.key)})` : 'var(--accent)', lead: c.key.length===2 ? logoHTML(c.key,'sm') : ''})).join(''));
+  } else ac += `<div style="color:var(--muted);font-size:14px">${T('Тип самолёта пока не указан ни у одного перелёта.')}</div>`;
+  if(S.noAircraft) ac += `<div class="gfoot" style="margin-top:8px">${T('Без типа самолёта:')} ${S.noAircraft}${T('. Добавьте через «Изменить» или «Подтянуть данные».')}</div>`;
+  h += card(T('Самолёты'),'✈︎', ac);
+  h += card(T('Авиакомпании'),'🏢', S.airlines.slice(0,8).map(c=>hbar(c.label, c.n, S.airlines[0].n, {sub:kmShort(c.extra)+T(' км'), color: c.key.length===2 ? `rgb(${brandRGB(c.key)})` : 'var(--accent)', lead: c.key.length===2 ? logoHTML(c.key,'sm') : ''})).join(''));
   const home = S.airports[0] && BY_IATA[S.airports[0].key];
-  h += card('Аэропорты','🏛', (home?`<div style="color:var(--accent2);font-size:14px;margin-bottom:4px">Домашний: ${home.iata} · ${esc(home.city)}</div>`:'')
+  h += card(T('Аэропорты'),'🏛', (home?`<div style="color:var(--accent2);font-size:14px;margin-bottom:4px">${T('Домашний:')} ${home.iata} · ${esc(home.city)}</div>`:'')
     + S.airports.slice(0,8).map(c=>{ const a=BY_IATA[c.key]; return hbar(`${c.key}  ${a?.city||''}`, c.n, S.airports[0].n, {lead:flagEmoji(a?.country)}); }).join(''));
-  const ext=(t,a)=>`<div style="flex:1;min-width:0"><div style="color:var(--muted);font-size:12px">${t}</div><div style="font:700 18px 'JetBrains Mono',monospace">${a.a.iata} → ${a.b.iata}</div><div style="color:var(--muted);font-size:12px">${fmtKm(a.km)} км · ${hm(arcMin(a))}</div></div>`;
-  h += card('Маршруты','⇄', S.routes.slice(0,5).map(c=>hbar(c.label, c.n, S.routes[0].n, {sub:fmtKm(c.extra)+' км', color:'var(--accent2)'})).join('')
-    + `<div style="display:flex;gap:10px;margin-top:12px">${S.longest?ext('Самый длинный',S.longest):''}${S.shortest && S.arcs.length>1?ext('Самый короткий',S.shortest):''}</div>`);
-  h += card('Страны','🏳', `<div style="font-size:22px;line-height:1.6;display:flex;flex-wrap:wrap;gap:8px">${S.countries.map(flagEmoji).join('')}</div>
-    <div class="donut" style="margin-top:10px">${donut([{n:S.international,color:'var(--accent)'},{n:S.domestic,color:'var(--accent2)'}],90)}<ul><li style="color:var(--accent)"><i style="background:var(--accent)"></i>Международные: ${S.international}</li><li style="color:var(--accent2)"><i style="background:var(--accent2)"></i>Внутренние: ${S.domestic}</li></ul></div>
-    ${period==='all' && S.newCountries.length>1 ? `<div class="gfoot" style="margin-top:12px">Новые страны по годам</div>${vbars(S.newCountries,{cls:'green'})}` : ''}`);
+  const ext=(t,a)=>`<div style="flex:1;min-width:0"><div style="color:var(--muted);font-size:12px">${t}</div><div style="font:700 18px 'JetBrains Mono',monospace">${a.a.iata} → ${a.b.iata}</div><div style="color:var(--muted);font-size:12px">${fmtKm(a.km)} ${T('км ·')} ${hm(arcMin(a))}</div></div>`;
+  h += card(T('Маршруты'),'⇄', S.routes.slice(0,5).map(c=>hbar(c.label, c.n, S.routes[0].n, {sub:fmtKm(c.extra)+T(' км'), color:'var(--accent2)'})).join('')
+    + `<div style="display:flex;gap:10px;margin-top:12px">${S.longest?ext(T('Самый длинный'),S.longest):''}${S.shortest && S.arcs.length>1?ext(T('Самый короткий'),S.shortest):''}</div>`);
+  h += card(T('Страны'),'🏳', `<div style="font-size:22px;line-height:1.6;display:flex;flex-wrap:wrap;gap:8px">${S.countries.map(flagEmoji).join('')}</div>
+    <div class="donut" style="margin-top:10px">${donut([{n:S.international,color:'var(--accent)'},{n:S.domestic,color:'var(--accent2)'}],90)}<ul><li style="color:var(--accent)"><i style="background:var(--accent)"></i>${T('Международные:')} ${S.international}</li><li style="color:var(--accent2)"><i style="background:var(--accent2)"></i>${T('Внутренние:')} ${S.domestic}</li></ul></div>
+    ${period==='all' && S.newCountries.length>1 ? `<div class="gfoot" style="margin-top:12px">${T('Новые страны по годам')}</div>${vbars(S.newCountries,{cls:'green'})}` : ''}`);
   // классы и места
   const cabT=S.cabins.reduce((s,c)=>s+c.n,0), seatT=S.seatTypes.reduce((s,c)=>s+c.n,0);
   let se='';
   if(cabT) se += `<div class="boxes" style="grid-template-columns:repeat(4,1fr)">${S.cabins.map(c=>`<div class="${c.n?'hot':''}"><b>${c.n}</b><small>${c.label}</small></div>`).join('')}</div>`;
   if(seatT){
     se += `<div class="boxes" style="grid-template-columns:repeat(3,1fr);margin-top:6px">${S.seatTypes.map(c=>`<div><div>${c.ico}</div><b>${c.n}</b><small>${c.label}</small></div>`).join('')}</div>`;
-    if(S.favoriteSeat) se += `<div style="font-weight:600;margin:12px 0 4px">Любимое место: ${esc(S.favoriteSeat[0])} (${S.favoriteSeat[1]} ${plural(S.favoriteSeat[1],'раз','раза','раз')})</div>`;
+    if(S.favoriteSeat) se += `<div style="font-weight:600;margin:12px 0 4px">${T('Любимое место:')} ${esc(S.favoriteSeat[0])} (${S.favoriteSeat[1]} ${plural(S.favoriteSeat[1],'раз','раза','раз')})</div>`;
     se += `<div class="seatmap" id="seatmap"><img src="seatmap.png" alt=""><canvas></canvas></div>
-      <div class="gfoot">Карта примерная: нос слева, места A–C — левый борт (внизу), чем ярче пятно — тем чаще там сидели.</div>`;
-  } else se += `<div style="color:var(--muted);font-size:14px;margin-top:8px">Места не указаны. Впишите место (например 18A) в «Изменить» — появится тепловая карта салона.</div>`;
-  h += card('Классы и места','💺', se);
+      <div class="gfoot">${T('Карта примерная: нос слева, места A–C — левый борт (внизу), чем ярче пятно — тем чаще там сидели.')}</div>`;
+  } else se += `<div style="color:var(--muted);font-size:14px;margin-top:8px">${T('Места не указаны. Впишите место (например 18A) в «Изменить» — появится тепловая карта салона.')}</div>`;
+  h += card(T('Классы и места'),'💺', se);
   if(S.trips.length){
     const groups=new Set(S.trips.map(t=>t.group??t.id)).size, km=S.trips.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0), by={};
     for(const t of S.trips) by[t.mode]=(by[t.mode]||0)+1; const mx=Math.max(...Object.values(by));
-    h += card('Наземные поездки','🚌', `<div class="big">${bigv(groups,'поездок')}${bigv(kmShort(km),'км по земле (по прямой)')}</div>`
+    h += card(T('Наземные поездки'),'🚌', `<div class="big">${bigv(groups,T('поездок'))}${bigv(kmShort(km),T('км по земле (по прямой)'))}</div>`
       + Object.keys(MODES).filter(k=>by[k]).map(k=>hbar(MODES[k].name, by[k], mx, {color:'var(--accent2)', lead:MODES[k].ico})).join(''));
   }
   return h;
@@ -1908,10 +1921,10 @@ function openStats(initial='all'){
   const today=todayStr();
   const periods = ['all', ...[...new Set(flights.filter(f=>f.date && f.date<=today).map(f=>f.date.slice(0,4)))].sort().reverse()];
   let period = periods.includes(initial) ? initial : 'all';
-  const m = openModal({title:'Статистика', left:null, right:'Готово', cls:'tall wide'}); m.el.querySelector('.mbox').style.setProperty('--tint','255 170 70');
+  const m = openModal({title:T('Статистика'), left:null, right:T('Готово'), cls:'tall wide'}); m.el.querySelector('.mbox').style.setProperty('--tint','255 170 70');
   function paint(){
     const S = computeStats(period);
-    m.body.innerHTML = `<div class="pchips">${periods.map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p==='all'?'Всё время':p}</button>`).join('')}</div>` + statsHTML(S, period);
+    m.body.innerHTML = `<div class="pchips">${periods.map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p==='all'?T('Всё время'):p}</button>`).join('')}</div>` + statsHTML(S, period);
     m.body.querySelector('.pchips').onclick = e=>{ const b=e.target.closest('[data-p]'); if(b){ period=b.dataset.p; paint(); } };
     const sm = m.body.querySelector('#seatmap');
     if(sm){ const img=sm.querySelector('img'); const go=()=>drawSeatHeat(sm, S.seats); img.complete ? requestAnimationFrame(go) : (img.onload=go); }
@@ -2192,11 +2205,11 @@ function draw(){
   }
 
   ShareCards.fly = {
-    title: 'Посадочный <span>талон</span>', hint: 'Только совершённые перелёты. Время в воздухе — оценка по расстоянию.',
+    title: T('Посадочный <span>талон</span>'), hint: T('Только совершённые перелёты. Время в воздухе — оценка по расстоянию.'),
     w: W, h: H,
     periods(){
       const years = [...new Set(flights.filter(f=>f.date && isDone(f)).map(f=>f.date.slice(0,4)))].sort().reverse();
-      return [['all','Всё время'], ...years.map(y=>[y,y])];
+      return [['all',T('Всё время')], ...years.map(y=>[y,y])];
     },
     prepare(){ return Promise.all([loadLand(), preloadFlags(Object.keys(visitedMap())), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]); },
     draw(p){ period = p; draw(); },
@@ -2219,7 +2232,7 @@ const THEMES = {
   dark:  { bg:'#0f1424', land:'#2a3149', border:'#0f1424', fill:'#34d399', terr:'#1f7a5a', text:'#eef1f8', muted:'#8a93a8', rule:'#2a3149' },
   sand:  { bg:'#efe6d4', land:'#d8c9aa', border:'#efe6d4', fill:'#c2410c', terr:'#f59e6b', text:'#3b2a17', muted:'#8a7558', rule:'#d8c9aa' },
 };
-const THEME_NAMES = { light:'Светлая', dark:'Тёмная', sand:'Песок' };
+const THEME_NAMES = { light:T('Светлая'), dark:T('Тёмная'), sand:T('Песок') };
 const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 function fmtD(s){ const [y,m,d]=s.split('-'); return `${+d} ${MON[+m-1]} ${y}`; }
 
@@ -2362,12 +2375,12 @@ function draw(){
 }
 
 ShareCards.country = {
-  title:'Карта стран', w:W, h:H, ticketLabel:'Карточка',
-  hint:'Страны из перелётов, путешествий и отметок. Острова и территории — отдельно, не в счёт стран.',
+  title:T('Карта стран'), w:W, h:H, ticketLabel:T('Карточка'),
+  hint:T('Страны из перелётов, путешествий и отметок. Острова и территории — отдельно, не в счёт стран.'),
   periods(){
     const dates = [...flights, ...trips].filter(x=>x.date && x.date<=todayStr()).map(x=>x.date.slice(0,4)).concat(journeys.map(j=>j.start.slice(0,4)));
     const ys = [...new Set(dates)].sort().reverse(), js = [...journeys].sort((a,b)=>b.start.localeCompare(a.start));
-    return [['all','Всё время'], ...ys.map(y=>[y,y]), ...js.map(j=>['j:'+j.id, '🧳 '+journeyTitle(j)])];
+    return [['all',T('Всё время')], ...ys.map(y=>[y,y]), ...js.map(j=>['j:'+j.id, '🧳 '+journeyTitle(j)])];
   },
   options:{ items:Object.keys(THEMES).map(k=>[k, THEME_NAMES[k]]), get:()=>theme, set:v=>{ theme=v; lsSet('flights.countryTheme', v); } },
   async prepare(){
@@ -2407,18 +2420,18 @@ const ShareModal = (()=>{
     let period = (key==='fly' && ps.includes(year)) ? year : 'all';
     if(key==='country' && selJourney!=null && ps.includes('j:'+selJourney)) period = 'j:'+selJourney;
     let format = 'ticket', busy = true;
-    const m = openModal({title: card.title.replace(/<[^>]+>/g,''), left:null, right:'Готово', cls:'tall'});
-    m.body.innerHTML = `<div class="seg" id="shFmt"><button data-f="ticket">${card.ticketLabel||'Билет'}</button><button data-f="story">Сторис</button></div>
+    const m = openModal({title: card.title.replace(/<[^>]+>/g,''), left:null, right:T('Готово'), cls:'tall'});
+    m.body.innerHTML = `<div class="seg" id="shFmt"><button data-f="ticket">${card.ticketLabel||T('Билет')}</button><button data-f="story">${T('Сторис')}</button></div>
       <div class="pchips" id="shP"></div>${card.options?'<div class="pchips" id="shO"></div>':''}
-      <div class="pcard"><canvas id="shOut"></canvas><div class="ploading" id="shL">Готовлю картинку…</div></div>
-      <div style="display:flex;gap:10px"><button class="btn acc" id="shSave" style="flex:1">⬇︎ Сохранить</button><button class="btn" id="shShare" style="flex:1">⬆︎ Поделиться</button></div>
+      <div class="pcard"><canvas id="shOut"></canvas><div class="ploading" id="shL">${T('Готовлю картинку…')}</div></div>
+      <div style="display:flex;gap:10px"><button class="btn acc" id="shSave" style="flex:1">${T('⬇︎ Сохранить')}</button><button class="btn" id="shShare" style="flex:1">${T('⬆︎ Поделиться')}</button></div>
       <div class="gfoot" id="shHint" style="text-align:center;margin-top:10px"></div>`;
     const q=x=>m.body.querySelector(x), out=q('#shOut');
     function chips(){
       q('#shFmt').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.f===format));
       q('#shP').innerHTML = card.periods().map(([v,l])=>`<button data-p="${esc(v)}" class="${v===period?'on':''}">${esc(l)}</button>`).join('');
       if(card.options) q('#shO').innerHTML = card.options.items.map(([v,l])=>`<button data-o="${v}" class="${v===card.options.get()?'on':''}">${l}</button>`).join('');
-      q('#shHint').textContent = format==='story' ? 'Для сторис: «Поделиться» → Instagram → Истории. На компьютере — сохраните картинку.' : card.hint;
+      q('#shHint').textContent = format==='story' ? T('Для сторис: «Поделиться» → Instagram → Истории. На компьютере — сохраните картинку.') : card.hint;
     }
     function render(){ src.width=card.w; src.height=card.h; card.draw(period); compose(out, card, format); }
     m.body.onclick = e=>{
@@ -2434,7 +2447,7 @@ const ShareModal = (()=>{
     q('#shShare').onclick = async ()=>{
       const b = await blob(), file = new File([b], fname(), {type:'image/png'});
       if(navigator.canShare && navigator.canShare({files:[file]})){ try{ await navigator.share({files:[file]}); }catch(e){} }
-      else { download(b); toast('Картинка сохранена — поделитесь ею из загрузок'); }
+      else { download(b); toast(T('Картинка сохранена — поделитесь ею из загрузок')); }
     };
     chips();
     await Promise.race([card.prepare(), new Promise(r=>setTimeout(r,6000))]);
@@ -2477,10 +2490,10 @@ function cityRow(c){
   const map = miniMapSlot('y'+c.key, {pts:[[c.lon,c.lat]], hl:[c.cc], hlFit:false, minSpan:7});
   if(c.home) return uCard({cls:'city-row', attrs:`data-city="${esc(c.key)}"`, ac:'120 130 150', more:false, map,
     lead:`<div class="ulead emoji">🏠</div>`, top: esc(countryName(c.cc)), title: esc(c.name),
-    chips: chipRow(['дом', c.visits?`поездок сюда: ${c.visits}`:null])});
+    chips: chipRow([T('дом'), c.visits?`${T('поездок сюда:')} ${c.visits}`:null])});
   return uCard({cls:'city-row', attrs:`data-city="${esc(c.key)}"`, ac:hashRGB(c.cc), more:!!c.manual, map,
     badge: c.last?dateShort(c.last):'', badgeCls:'past', lead: flagsLead([c.cc]), top: esc(countryName(c.cc)), title: esc(c.name),
-    chips: chipRow([`${c.visits} ${plural(c.visits,'визит','визита','визитов')}`, c.air?'✈':null, (c.ground-(c.manual?.length||0))>0?'🚌':null, c.manual?'вручную':null])});
+    chips: chipRow([`${c.visits} ${plural(c.visits,'визит','визита','визитов')}`, c.air?'✈':null, (c.ground-(c.manual?.length||0))>0?'🚌':null, c.manual?T('вручную'):null])});
 }
 
 const CONTINENTS = {
@@ -2505,13 +2518,13 @@ function countryStatsData(period){
   for(const j of journeys.filter(j=>j.start<=today)) for(const cc of j.countries) seen(cc, j.start);
   const newBy = {}; for(const [cc,d] of Object.entries(first)) if(isCountry(cc)) (newBy[d.slice(0,4)] ??= []).push(cc);
   const conts = Object.keys(CONTINENTS).map(k=>{ const total=[...SOVEREIGN].filter(c=>CONT_OF[c]===k).length, got=countries.filter(c=>CONT_OF[c]===k);
-    return {label:k, n:got.length, total, codes:got}; });
+    return {label:T(k), n:got.length, total, codes:got}; });
   // «где бывали чаще всего» — без времени, когда вы там жили
   const cnt = {}, bump = (cc,k)=>{ const v = cnt[cc] ??= {flights:0, trips:0, journeys:0}; v[k]++; };
   for(const a of arcs) for(const p of [a.a,a.b]) if(!homeAt(p.country, p.lat, p.lon, a.f.date)) bump(p.country,'flights');
   for(const t of ts) for(const p of [t.from,t.to]){ const cc=(p.cc||'').toUpperCase(); if(cc && !homeAt(cc, +p.lat, +p.lon, t.date)) bump(cc,'trips'); }
   for(const j of js) for(const cc of j.countries) if(!homeAt(cc, null, null, j.start)) bump(cc,'journeys');
-  const top = countries.filter(cc=>cnt[cc]).map(cc=>({cc, n:cnt[cc].flights+cnt[cc].trips+cnt[cc].journeys, v:cnt[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),'ru'));
+  const top = countries.filter(cc=>cnt[cc]).map(cc=>({cc, n:cnt[cc].flights+cnt[cc].trips+cnt[cc].journeys, v:cnt[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),LANG));
   const days = j => Math.round((new Date(j.end+'T12:00') - new Date(j.start+'T12:00'))/864e5) + 1;
   const groups = {}; for(const t of ts){ (groups[t.group ?? t.id] ??= []).push(t); }
   const gl = Object.values(groups), gkm = g=>g.reduce((s,t)=>s+(+t.km||dist(t.from,t.to)),0);
@@ -2524,41 +2537,41 @@ function countryStatsData(period){
 
 function countryStatsHTML(D){
   const nC = D.countries.length;
-  if(!nC && !D.terr.length && !D.cities.length) return `<div class="empty"><div class="ico">🌍</div>За этот период стран нет</div>`;
+  if(!nC && !D.terr.length && !D.cities.length) return `<div class="empty"><div class="ico">🌍</div>${T('За этот период стран нет')}</div>`;
   let h = '';
-  h += card('Обзор','✨', `<div class="big">${bigv(nC, plural(nC,'страна','страны','стран'))}${bigv(Math.round(nC/195*100)+'%','мира')}
-    ${bigv(D.cities.length, plural(D.cities.length,'город','города','городов'))}${bigv(D.terr.length,'территорий и островов')}
-    ${bigv(D.js.length, plural(D.js.length,'путешествие','путешествия','путешествий'))}${bigv(D.jDays, plural(D.jDays,'день','дня','дней')+' в путешествиях')}
-    ${bigv(D.gl.length,'наземных поездок')}${bigv(kmShort(D.groundKm),'км по земле')}</div>
-    <div class="gfoot" style="margin-top:12px">Мир: ${nC} из 195</div><div class="prog lap"><i style="width:${nC/195*100}%;--c:var(--green)"></i></div>`);
-  h += card('Части света','🧭', D.conts.map(c=>hbar(c.label, c.n, c.total, {sub:`из ${c.total}`, color:'var(--green)'})).join('')
-    + `<div class="gfoot" style="margin-top:6px">Посещено частей света: ${D.conts.filter(c=>c.n).length} из 6</div>`);
-  if(D.top.length) h += card('Где бывали чаще всего','📍', D.top.slice(0,8).map(t=>{ const v=t.v;
+  h += card(T('Обзор'),'✨', `<div class="big">${bigv(nC, plural(nC,'страна','страны','стран'))}${bigv(Math.round(nC/195*100)+'%',T('мира'))}
+    ${bigv(D.cities.length, plural(D.cities.length,'город','города','городов'))}${bigv(D.terr.length,T('территорий и островов'))}
+    ${bigv(D.js.length, plural(D.js.length,'путешествие','путешествия','путешествий'))}${bigv(D.jDays, plural(D.jDays,'день','дня','дней')+T(' в путешествиях'))}
+    ${bigv(D.gl.length,T('наземных поездок'))}${bigv(kmShort(D.groundKm),T('км по земле'))}</div>
+    <div class="gfoot" style="margin-top:12px">${T('Мир:')} ${nC} ${T('из 195')}</div><div class="prog lap"><i style="width:${nC/195*100}%;--c:var(--green)"></i></div>`);
+  h += card(T('Части света'),'🧭', D.conts.map(c=>hbar(c.label, c.n, c.total, {sub:`${T('из')} ${c.total}`, color:'var(--green)'})).join('')
+    + `<div class="gfoot" style="margin-top:6px">${T('Посещено частей света:')} ${D.conts.filter(c=>c.n).length} ${T('из 6')}</div>`);
+  if(D.top.length) h += card(T('Где бывали чаще всего'),'📍', D.top.slice(0,8).map(t=>{ const v=t.v;
       return hbar(countryName(t.cc), t.n, D.top[0].n, {lead:flagHTML(t.cc,18), color:'var(--green)', sub:[v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null].filter(Boolean).join(' ')}); }).join('')
-    + `<div class="gfoot">Считаются перелёты в страну и из неё, наземные участки и путешествия.${homes.length ? ' Время, когда вы там жили, не считается.' : ' Укажите в профиле, где живёте, — дом перестанет попадать в топ.'}</div>`);
+    + `<div class="gfoot">${T('Считаются перелёты в страну и из неё, наземные участки и путешествия.')}${homes.length ? T(' Время, когда вы там жили, не считается.') : T(' Укажите в профиле, где живёте, — дом перестанет попадать в топ.')}</div>`);
   if(D.period==='all'){
     const ny = Object.keys(D.newBy).sort().map(k=>({label:k, n:D.newBy[k].length}));
-    if(ny.length) h += card('Новые страны по годам','🆕', vbars(ny,{cls:'green'}));
+    if(ny.length) h += card(T('Новые страны по годам'),'🆕', vbars(ny,{cls:'green'}));
   } else {
     const nw = D.newBy[D.period] || [];
-    h += card(`Впервые в ${D.period}`,'🆕', nw.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${nw.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}</span>`).join('')}</div>` : `<div style="color:var(--muted);font-size:14px">Новых стран в этом году не было</div>`);
+    h += card(`${T('Впервые в')} ${D.period}`,'🆕', nw.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${nw.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}</span>`).join('')}</div>` : `<div style="color:var(--muted);font-size:14px">${T('Новых стран в этом году не было')}</div>`);
   }
-  if(D.cities.length) h += card('Города','🏙', `<div style="font-size:22px;font-weight:700;margin-bottom:4px">${D.cities.length} ${plural(D.cities.length,'город','города','городов')}</div>`
+  if(D.cities.length) h += card(T('Города'),'🏙', `<div style="font-size:22px;font-weight:700;margin-bottom:4px">${D.cities.length} ${plural(D.cities.length,'город','города','городов')}</div>`
     + D.cities.slice(0,8).map(c=>hbar(c.name, c.visits, D.cities[0].visits, {lead:flagHTML(c.cc,18), color:'#e11d48', sub:plural(c.visits,'визит','визита','визитов')})).join('')
-    + `<div class="gfoot">Визит — отдельная дата перелёта или поездки. Аэропорты рядом с городом считаются этим городом.${homes.length ? ' Город, где вы жили, в это время не считается.' : ''}</div>`);
+    + `<div class="gfoot">${T('Визит — отдельная дата перелёта или поездки. Аэропорты рядом с городом считаются этим городом.')}${homes.length ? T(' Город, где вы жили, в это время не считается.') : ''}</div>`);
   if(D.js.length){
     const L = D.longest;
-    h += card('Путешествия','🧳', `<div class="big">${bigv(D.js.length,'путешествий')}${bigv(Math.round(D.jDays/D.js.length*10)/10,'дней в среднем')}</div>`
-      + (L ? `<div class="gfoot" style="margin-top:10px">Самое долгое: <b style="color:var(--text)">${esc(journeyTitle(L))}</b> — ${D.days(L)} ${plural(D.days(L),'день','дня','дней')} (${journeyDates(L)})</div>` : '')
-      + (D.period==='all' && D.jYears.length>1 ? `<div class="sub-t" style="margin-top:14px">Путешествий в год</div>` + vbars(D.jYears) : ''));
+    h += card(T('Путешествия'),'🧳', `<div class="big">${bigv(D.js.length,T('путешествий'))}${bigv(Math.round(D.jDays/D.js.length*10)/10,T('дней в среднем'))}</div>`
+      + (L ? `<div class="gfoot" style="margin-top:10px">${T('Самое долгое:')} <b style="color:var(--text)">${esc(journeyTitle(L))}</b> — ${D.days(L)} ${plural(D.days(L),'день','дня','дней')} (${journeyDates(L)})</div>` : '')
+      + (D.period==='all' && D.jYears.length>1 ? `<div class="sub-t" style="margin-top:14px">${T('Путешествий в год')}</div>` + vbars(D.jYears) : ''));
   }
   if(D.gl.length){
     const long = D.gl.reduce((b,g)=>!b||D.gkm(g)>D.gkm(b)?g:b, null), mx = Math.max(...Object.values(D.byMode));
-    h += card('Наземные поездки','🚌', `<div class="big">${bigv(D.gl.length,'поездок')}${bigv(kmShort(D.groundKm),'км (по прямой)')}</div>`
-      + Object.keys(MODES).filter(k=>D.byMode[k]).map(k=>hbar(MODES[k].name, Math.round(D.byMode[k]), mx, {lead:MODES[k].ico, color:'var(--accent2)', sub:'км'})).join('')
-      + (long ? `<div class="gfoot" style="margin-top:8px">Самая длинная: ${esc(legsTitle(long))} — ${fmtKm(D.gkm(long))} км</div>` : ''));
+    h += card(T('Наземные поездки'),'🚌', `<div class="big">${bigv(D.gl.length,T('поездок'))}${bigv(kmShort(D.groundKm),T('км (по прямой)'))}</div>`
+      + Object.keys(MODES).filter(k=>D.byMode[k]).map(k=>hbar(MODES[k].name, Math.round(D.byMode[k]), mx, {lead:MODES[k].ico, color:'var(--accent2)', sub:T('км')})).join('')
+      + (long ? `<div class="gfoot" style="margin-top:8px">${T('Самая длинная:')} ${esc(legsTitle(long))} — ${fmtKm(D.gkm(long))} ${T('км')}</div>` : ''));
   }
-  if(D.terr.length) h += card('Территории и острова','🏝', `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${D.terr.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}${isDisputed(cc)?' <small style="color:var(--muted)">· спорная</small>':''}</span>`).join('')}</div>`);
+  if(D.terr.length) h += card(T('Территории и острова'),'🏝', `<div style="display:flex;flex-wrap:wrap;gap:8px 14px">${D.terr.map(cc=>`<span>${flagHTML(cc,18)} ${esc(countryName(cc))}${isDisputed(cc)?T(' <small style="color:var(--muted)">· спорная</small>'):''}</span>`).join('')}</div>`);
   return h;
 }
 function openCountryStats(initial='all'){
@@ -2566,9 +2579,9 @@ function openCountryStats(initial='all'){
   const ys = new Set([...flights.filter(f=>f.date && f.date<=today).map(f=>f.date.slice(0,4)), ...trips.filter(t=>t.date && t.date<=today).map(t=>t.date.slice(0,4)), ...journeys.filter(j=>j.start<=today).map(j=>j.start.slice(0,4))]);
   const periods = ['all', ...[...ys].sort().reverse()];
   let period = periods.includes(initial) ? initial : 'all';
-  const m = openModal({title:'Страны и путешествия', left:null, right:'Готово', cls:'tall wide'}); m.el.querySelector('.mbox').style.setProperty('--tint','52 211 153');
+  const m = openModal({title:T('Страны и путешествия'), left:null, right:T('Готово'), cls:'tall wide'}); m.el.querySelector('.mbox').style.setProperty('--tint','52 211 153');
   function paint(){
-    m.body.innerHTML = `<div class="pchips">${periods.map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p==='all'?'Всё время':p}</button>`).join('')}</div>` + countryStatsHTML(countryStatsData(period));
+    m.body.innerHTML = `<div class="pchips">${periods.map(p=>`<button data-p="${p}" class="${p===period?'on':''}">${p==='all'?T('Всё время'):p}</button>`).join('')}</div>` + countryStatsHTML(countryStatsData(period));
     m.body.querySelector('.pchips').onclick = e=>{ const b=e.target.closest('[data-p]'); if(b){ period=b.dataset.p; paint(); } };
   }
   paint();
@@ -2579,7 +2592,7 @@ function openCountryStats(initial='all'){
 // =====================================================================
 (async ()=>{
   setDetent(detent, false);
-  try{ await loadData(); }catch(e){ toast('Не удалось загрузить базу аэропортов'); }
+  try{ await loadData(); }catch(e){ toast(T('Не удалось загрузить базу аэропортов')); }
   refresh();
   initMap();
 })();
