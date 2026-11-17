@@ -156,6 +156,9 @@
   .pchips::-webkit-scrollbar{display:none}
   .pchips button{height:34px;padding:0 14px;border-radius:17px;background:rgba(255,255,255,.1);font-size:14px;font-weight:600;white-space:nowrap}
   .pchips button.on{background:var(--accent);color:var(--ink)}
+  .listtabs{padding:0 0 8px}
+  .listtabs button{height:30px;padding:0 12px;font-size:13px}
+  .listtabs button small{opacity:.65;margin-left:5px;font-weight:600}
   .check{margin-left:auto;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:13px;color:#06210f;background:var(--green);flex:none}
   .check.auto{background:#5b6273;color:#fff}
   .found{display:flex;gap:12px;align-items:center;padding:10px 14px;cursor:pointer}
@@ -278,6 +281,7 @@
       </div>
       <div class="tiles" id="countryTiles"></div>
       <div class="seg layerseg" id="layerSeg"><button data-l="countries">🗺 Страны</button><button data-l="cities">📍 Города</button></div>
+      <div class="pchips listtabs" id="listTabs"></div>
       <div class="list" id="countryList"></div>
     </section>
   </div>
@@ -602,6 +606,7 @@ const legsCountries = legs => [...new Set(legs.flatMap(l=>[l.from,l.to]).filter(
 let page = 0, selected = null, selJourney = null, selCountry = null;
 let year = lsGet('flights.year', 'all');
 let layer = lsGet('map.layer', 'countries') === 'cities' ? 'cities' : 'countries';
+let listTab = ['journeys','places','trips'].includes(lsGet('country.tab','')) ? lsGet('country.tab','') : 'journeys';
 let map = null, mapReady = false;
 const EMPTY_FC = {type:'FeatureCollection', features:[]};
 
@@ -986,15 +991,22 @@ function renderCountry(){
   if(!visited.length && !js.length && !tg.length){
     list.innerHTML = `<div class="empty"><div class="ico">🌍</div>Страны появятся из перелётов.<br>Нажмите «+», чтобы отметить страну вручную или добавить путешествие.</div>`; return;
   }
+  // вкладки списка: путешествия / страны (или города) / наземные поездки
+  const cs = layer==='cities' ? currentCities() : [];
+  const placesN = layer==='cities' ? cs.filter(c=>!c.home).length : countries.length + terr.length;
+  const tabs = [['journeys','Путешествия',js.length],['places', layer==='cities'?'Города':'Страны', placesN],['trips','Наземные поездки',tg.length]];
+  $('#listTabs').innerHTML = tabs.map(([k,l,n])=>`<button data-t="${k}" class="${k===listTab?'on':''}">${l}<small>${n}</small></button>`).join('');
   let h='';
-  if(js.length) h += `<div class="sec">Путешествия</div>` + js.map(journeyRow).join('');
-  if(tg.length) h += `<div class="sec">Наземные поездки</div>` + tg.map(tripRow).join('');
-  if(layer==='cities'){
-    const cs = currentCities();
-    h += `<div class="sec">Города · ${cs.filter(c=>!c.home).length}</div>` + (cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`);
+  if(listTab==='journeys'){
+    h = js.length ? js.map(journeyRow).join('') : `<div class="empty">Путешествий пока нет.<br>Нажмите «+» → «Новое путешествие».</div>`;
+  } else if(listTab==='trips'){
+    h = tg.length ? tg.map(tripRow).join('') : `<div class="empty">Наземных поездок пока нет.<br>Нажмите «+» → «Наземная поездка».</div>`;
+  } else if(layer==='cities'){
+    h = cs.length ? cs.map(cityRow).join('') : `<div class="empty">Города появятся из перелётов и наземных поездок</div>`;
   } else {
     if(countries.length) h += `<div class="sec">Страны</div>` + countries.map(countryRow).join('');
     if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
+    if(!h) h = `<div class="empty">Страны появятся из перелётов.<br>Нажмите «+», чтобы отметить страну вручную.</div>`;
   }
   list.innerHTML = h;
   list.querySelectorAll('[data-city]').forEach(el=>{
@@ -1028,7 +1040,8 @@ function renderCountry(){
 }
 function deleteTrip(legs){ const ids=new Set(legs.map(l=>l.id)); trips = trips.filter(t=>!ids.has(t.id)); saveTrips(); }
 $('#countryTiles').onclick = ()=>openCountryStats('all');
-$('#layerSeg').onclick = e=>{ const b=e.target.closest('[data-l]'); if(!b) return; layer=b.dataset.l; lsSet('map.layer', layer); selCountry=null; refresh(); };
+$('#listTabs').onclick = e=>{ const b=e.target.closest('[data-t]'); if(!b) return; listTab=b.dataset.t; lsSet('country.tab', listTab); $('#countryList').scrollTop=0; renderCountry(); };
+$('#layerSeg').onclick = e=>{ const b=e.target.closest('[data-l]'); if(!b) return; layer=b.dataset.l; lsSet('map.layer', layer); listTab='places'; lsSet('country.tab', listTab); selCountry=null; refresh(); };
 $('#countryShare').onclick = ()=>ShareModal.open('country');
 $('#addCountry').onclick = e=>popMenu(e.currentTarget, [
   {label:'🏳  Отметить страны', act:()=>openManualPicker()},
@@ -1353,7 +1366,7 @@ function openJourneyForm(editing){
   function save(){
     const j = draft();
     if(editing){ const i=journeys.findIndex(x=>x.id===editing.id); if(i>=0) journeys[i]=j; }
-    else { journeys.push(j); selCountry=null; selJourney=j.id; }
+    else { journeys.push(j); selCountry=null; selJourney=j.id; listTab='journeys'; lsSet('country.tab', listTab); }
     m.close(); saveJourneys();
     if(!editing){ setPage(1); setDetent('low'); setTimeout(()=>focusJourney(j), 100); }
   }
@@ -1426,7 +1439,7 @@ function openTripForm(editing){
     const pts=s.stops, base = first?.id ?? Date.now(), group = pts.length>2 ? base : undefined, d = s.hasDate ? s.date : '';
     const legs = pts.slice(0,-1).map((p,i)=>{ const t={ id:base+i, mode:s.mode, from:pts[i], to:pts[i+1], date:d, note:s.note.trim(), km:Math.round(dist(pts[i],pts[i+1])) }; if(group!=null) t.group=group; return t; });
     if(editing){ const ids=new Set(editing.map(l=>l.id)); trips = trips.filter(t=>!ids.has(t.id)); }
-    trips.push(...legs); m.close(); saveTrips();
+    trips.push(...legs); m.close(); listTab='trips'; lsSet('country.tab', listTab); saveTrips();
   }
   paint();
 }
@@ -1501,7 +1514,7 @@ function openCityForm(){
   q('#cfD').onchange = e=>{ s.date = e.target.value || todayStr(); };
   function save(){
     mcities.push({ id:Date.now(), name:s.place.name, sub:s.place.sub||'', cc:s.place.cc, lat:s.place.lat, lon:s.place.lon, date: s.hasDate ? s.date : '' });
-    m.close(); layer='cities'; lsSet('map.layer', layer); setPage(1); saveCities();
+    m.close(); layer='cities'; lsSet('map.layer', layer); listTab='places'; lsSet('country.tab', listTab); setPage(1); saveCities();
   }
   paint(); setTimeout(()=>q('#cfP').click(), 50);
 }
