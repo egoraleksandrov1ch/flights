@@ -559,7 +559,8 @@ const EMPTY_FC = {type:'FeatureCollection', features:[]};
 
 // ---------- глобус: карта OpenFreeMap (Liberty), как раньше на сайте ----------
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-const C = { line:'#ff5a1f', line2:'#1f7aff', sel:'#d10068', up:'#7d8696', upSel:'#4b5363', dot:'#ff5a1f', halo:'#ffffff', text:'#1b1f2a', fill:'#22c55e' };
+// линии «паутиной»: тонкая серебристо-белая нить с тёмной обводкой, чтобы читалась на светлой карте
+const C = { web:'#eef2f7', webCase:'rgba(28,33,44,0.55)', sel:'#ffffff', selCase:'rgba(20,24,34,0.85)', up:'#eef2f7', upSel:'#ffffff', dot:'#ff5a1f', halo:'#ffffff', text:'#1b1f2a', fill:'#22c55e' };
 
 function initMap(){
   map = new maplibregl.Map({
@@ -607,12 +608,16 @@ function addLayers(){
   map.addLayer({id:'country-fill',type:'fill',source:'countries',paint:{'fill-color':C.fill,'fill-opacity':0.42}});
   map.addLayer({id:'country-line',type:'line',source:'countries',paint:{'line-color':'#16a34a','line-width':1,'line-opacity':0.8}});
   // градиент вдоль дуги: оранжевый у вылета → голубой у прилёта
+  map.addLayer({id:'flights-case',type:'line',source:'flights',layout:round,
+    paint:{'line-width':['interpolate',['linear'],['zoom'],0,2.6,5,3.6],'line-color':C.webCase,'line-opacity':0.9}});
   map.addLayer({id:'flights-base',type:'line',source:'flights',layout:round,filter:['!',['get','up']],
-    paint:{'line-width':2,'line-opacity':0.85,'line-gradient':['interpolate',['linear'],['line-progress'],0,C.line,1,C.line2]}});
+    paint:{'line-width':['interpolate',['linear'],['zoom'],0,1.1,5,1.6],'line-color':C.web,'line-opacity':0.95}});
   map.addLayer({id:'flights-up',type:'line',source:'flights',layout:{'line-join':'round'},filter:['get','up'],
-    paint:{'line-width':1.8,'line-color':C.up,'line-opacity':0.85,'line-dasharray':[2,2]}});
+    paint:{'line-width':['interpolate',['linear'],['zoom'],0,1.1,5,1.6],'line-color':C.up,'line-opacity':0.95,'line-dasharray':[2.5,2]}});
+  map.addLayer({id:'flights-sel-case',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
+    paint:{'line-width':6,'line-color':C.selCase,'line-blur':1}});
   map.addLayer({id:'flights-sel',type:'line',source:'flights',layout:round,filter:['==',['get','id'],-1],
-    paint:{'line-width':3.2,'line-color':C.sel}});
+    paint:{'line-width':2.6,'line-color':C.sel}});
   map.addLayer({id:'flights-hit',type:'line',source:'flights',paint:{'line-width':16,'line-opacity':0}});
   map.addLayer({id:'airports',type:'circle',source:'airports',
     paint:{'circle-radius':['interpolate',['linear'],['zoom'],0,2.6,4,4,8,6],'circle-color':C.dot,'circle-stroke-width':1.5,'circle-stroke-color':C.halo}});
@@ -664,9 +669,11 @@ function updateMap(force){
   }
   const hasSel = page===0 && selected!=null;
   map.setFilter('flights-sel', ['==',['get','id'], hasSel ? selected : -1]);
+  map.setFilter('flights-sel-case', ['==',['get','id'], hasSel ? selected : -1]);
+  map.setPaintProperty('flights-case','line-opacity', hasSel ? 0.25 : 0.9);
   map.setPaintProperty('flights-sel','line-color', ['case',['get','up'], C.upSel, C.sel]);
-  map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.22 : 0.85);
-  map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.3 : 0.85);
+  map.setPaintProperty('flights-base','line-opacity', hasSel ? 0.35 : 0.95);
+  map.setPaintProperty('flights-up','line-opacity', hasSel ? 0.35 : 0.95);
   map.setPaintProperty('country-fill','fill-opacity', selCountry ? ['case',['==',['get','iso'],selCountry],0.65,0.28] : 0.42);
 }
 
