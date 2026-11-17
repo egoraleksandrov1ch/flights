@@ -224,6 +224,8 @@
   .maplibregl-popup-tip{border-top-color:#1c1d22!important;border-bottom-color:#1c1d22!important}
   @media (hover:none){ .row .more{display:none} }
   .mbox.dlg{max-width:400px}
+  img.fl{height:.95em;width:auto;aspect-ratio:4/3;vertical-align:-.12em;border-radius:2px;box-shadow:0 0 0 .5px rgba(0,0,0,.35)}
+  img.rflag{object-fit:cover;border-radius:3px;box-shadow:0 0 0 .5px rgba(0,0,0,.35)}
   .prog.lap{height:12px;border-radius:6px;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}
   .prog.lap.full{background:linear-gradient(180deg, rgba(255,255,255,.22), rgba(0,0,0,.08)), var(--c)}
   .prog.lap i{border-radius:6px;background:linear-gradient(180deg, rgba(255,255,255,.25), rgba(0,0,0,.12)), var(--c);
@@ -343,7 +345,35 @@ function hm(min){ const h=Math.floor(min/60), m=min%60; return h>0 ? `${h}ч ${m
 const estMin = km => Math.round(km/800*60 + 30);
 function daysUntil(date){ const a=new Date(todayStr()+'T00:00'), b=new Date(date+'T00:00'); return Math.round((b-a)/864e5); }
 function untilLabel(date){ const n=daysUntil(date); if(n<=0) return 'сегодня'; if(n===1) return 'завтра'; return `через ${n} ${plural(n,'день','дня','дней')}`; }
-function flagEmoji(cc){ return cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map(c=>0x1F1E6+c.charCodeAt(0)-65)) : ''; }
+// ---------- флаги: свои SVG (flags.json, набор flag-icons, MIT) — эмодзи-флагов нет в Windows ----------
+let FLAGS = {};
+const flagURLs = {}, flagImgs = {};
+/** адрес картинки флага (blob: для обычных, нарисованный для островов-регионов) */
+function flagSrc(cc){
+  if(!cc) return '';
+  if(isRegion(cc)) return regionFlagURL(cc);
+  cc = cc.toUpperCase();
+  if(flagURLs[cc]) return flagURLs[cc];
+  const svg = FLAGS[cc]; if(!svg) return '';
+  return flagURLs[cc] = URL.createObjectURL(new Blob([svg], {type:'image/svg+xml'}));
+}
+/** флаг внутри текста (подписи, списки) — маленькая картинка по высоте строки */
+function flagEmoji(cc){ const src = flagSrc(cc); return src ? `<img class="fl" src="${src}" alt="">` : ''; }
+/** загрузить картинки флагов заранее — для рисования на canvas */
+function preloadFlags(codes){
+  return Promise.all([...new Set(codes)].filter(Boolean).map(cc=>{
+    if(flagImgs[cc]?.complete) return Promise.resolve();
+    const src = flagSrc(cc); if(!src) return Promise.resolve();
+    const im = flagImgs[cc] = new Image(); im.src = src;
+    return im.decode ? im.decode().catch(()=>{}) : new Promise(r=>{ im.onload=im.onerror=r; });
+  }));
+}
+/** круглый флаг на canvas (флаг «обрезается» кругом, как эмодзи) */
+function drawFlagCircle(g, cc, x, y, r){
+  const im = flagImgs[cc];
+  if(isRegion(cc)){ drawRegionFlag(g, cc, x-r*1.2, y-r, r*2.4, r*2); return; }
+  if(im && im.complete && im.naturalWidth){ const h=r*2, w=h*4/3; g.drawImage(im, x-w/2, y-r, w, h); }
+}
 function toast(msg, ms=2600){ const t=document.createElement('div'); t.className='toast glass'; t.textContent=msg; document.body.append(t); setTimeout(()=>t.remove(), ms); }
 const yearOf = f => f.date ? f.date.slice(0,4) : 'none';
 
@@ -373,7 +403,8 @@ function regionFlagURL(cc){
 /** флаг для списков: эмодзи или картинка для острова */
 function flagHTML(cc, size=24){
   if(isRegion(cc)) return `<img class="rflag" src="${regionFlagURL(cc)}" style="width:${Math.round(size*1.05)}px;height:${Math.round(size*.7)}px" alt="">`;
-  return `<span class="flag" style="font-size:${size}px">${flagEmoji(cc)}</span>`;
+  const src = flagSrc(cc);
+  return src ? `<img class="rflag" src="${src}" style="width:${Math.round(size*1.05)}px;height:${Math.round(size*.79)}px" alt="">` : '';
 }
 
 // ---------- данные (формат как у приложения и старого сайта) ----------
@@ -407,6 +438,7 @@ async function loadData(){
     fetch('airports.json').then(r=>r.json()),
     fetch('airlines.json').then(r=>r.json()).catch(()=>({})),
     fetch('countries.json').then(r=>r.json()).catch(()=>({})),
+    fetch('flags.json').then(r=>r.json()).then(f=>{ FLAGS=f; }).catch(()=>{}),
   ]);
   AIRPORTS = ap.map(([iata,icao,name,city,country,lat,lon])=>({iata,icao,name,city,country,lat,lon}));
   for(const a of AIRPORTS){ BY_IATA[a.iata] ??= a; if(a.icao) BY_ICAO[a.icao.toUpperCase()] ??= a; }
@@ -573,8 +605,11 @@ function initMap(){
     if(!isMobile()) map.setPadding({left:426, top:0, right:0, bottom:0});
     addLayers(); mapReady = true; updateMap(true);
   });
+  const pendingFlags = new Set();
   map.on('styleimagemissing', e=>{
-    if(e.id.startsWith('flag-') && !map.hasImage(e.id)) map.addImage(e.id, flagImage(e.id.slice(5)), {pixelRatio:2});
+    if(!e.id.startsWith('flag-') || map.hasImage(e.id) || pendingFlags.has(e.id)) return;
+    const cc = e.id.slice(5); pendingFlags.add(e.id);
+    preloadFlags([cc]).then(()=>{ if(!map.hasImage(e.id)) map.addImage(e.id, flagImage(cc), {pixelRatio:2}); });
   });
   map.on('click', e=>{
     const hit = map.queryRenderedFeatures([[e.point.x-8,e.point.y-8],[e.point.x+8,e.point.y+8]], {layers:['flights-hit','country-flags','country-fill'].filter(l=>map.getLayer(l))});
@@ -592,7 +627,7 @@ function flagImage(cc){
   const S=64, c=document.createElement('canvas'); c.width=c.height=S; const g=c.getContext('2d');
   g.save(); g.beginPath(); g.arc(S/2,S/2,S/2-4,0,7); g.fillStyle='#fff'; g.fill(); g.clip();
   if(isRegion(cc)) drawRegionFlag(g, cc, 0, 8, S, S-16);
-  else { g.font='58px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(flagEmoji(cc), S/2, S/2+3); }
+  else drawFlagCircle(g, cc, S/2, S/2, S/2-4);
   g.restore();
   g.beginPath(); g.arc(S/2,S/2,S/2-4,0,7); g.lineWidth=4; g.strokeStyle='#fff'; g.stroke();
   return g.getImageData(0,0,S,S);
@@ -1690,7 +1725,7 @@ function statsHTML(S, period){
   const ext=(t,a)=>`<div style="flex:1;min-width:0"><div style="color:var(--muted);font-size:12px">${t}</div><div style="font:700 18px 'JetBrains Mono',monospace">${a.a.iata} → ${a.b.iata}</div><div style="color:var(--muted);font-size:12px">${fmtKm(a.km)} км · ${hm(arcMin(a))}</div></div>`;
   h += card('Маршруты','⇄', S.routes.slice(0,5).map(c=>hbar(c.label, c.n, S.routes[0].n, {sub:fmtKm(c.extra)+' км', color:'var(--accent2)'})).join('')
     + `<div style="display:flex;gap:10px;margin-top:12px">${S.longest?ext('Самый длинный',S.longest):''}${S.shortest && S.arcs.length>1?ext('Самый короткий',S.shortest):''}</div>`);
-  h += card('Страны','🏳', `<div style="font-size:22px;line-height:1.5;letter-spacing:3px">${S.countries.map(flagEmoji).join(' ')}</div>
+  h += card('Страны','🏳', `<div style="font-size:22px;line-height:1.6;display:flex;flex-wrap:wrap;gap:8px">${S.countries.map(flagEmoji).join('')}</div>
     <div class="donut" style="margin-top:10px">${donut([{n:S.international,color:'var(--accent)'},{n:S.domestic,color:'var(--accent2)'}],90)}<ul><li style="color:var(--accent)"><i style="background:var(--accent)"></i>Международные: ${S.international}</li><li style="color:var(--accent2)"><i style="background:var(--accent2)"></i>Внутренние: ${S.domestic}</li></ul></div>
     ${period==='all' && S.newCountries.length>1 ? `<div class="gfoot" style="margin-top:12px">Новые страны по годам</div>${vbars(S.newCountries,{cls:'green'})}` : ''}`);
   // классы и места
@@ -1761,7 +1796,7 @@ const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','
 const isDone = f => !f.date || f.date <= todayStr();
 function fmtD(s){ const [y,m,d]=s.split('-'); return `${d} ${MON[+m-1]} ${y}`; }
 function fmtN(n){ return Math.round(n).toLocaleString('en-US').replace(/,/g,' '); }
-function flagEmoji(cc){ return cc && cc.length===2 ? String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)) : ''; }
+
 
 function compute(){
   const all = flights.filter(f=>BY_IATA[f.from] && BY_IATA[f.to] && isDone(f));
@@ -1971,8 +2006,7 @@ function draw(){
   let fx = 84;
   for(const cc of flags){
     ctx.save(); ctx.beginPath(); ctx.arc(fx,1248,24,0,7); ctx.fillStyle='#fff'; ctx.fill(); ctx.clip();
-    ctx.font='58px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(flagEmoji(cc), fx, 1251); ctx.restore();
+    drawFlagCircle(ctx, cc, fx, 1248, 24); ctx.restore();
     ctx.beginPath(); ctx.arc(fx,1248,24,0,7); ctx.strokeStyle=PAPER; ctx.lineWidth=4; ctx.stroke();
     fx += 42;
   }
@@ -2026,7 +2060,7 @@ function draw(){
       const years = [...new Set(flights.filter(f=>f.date && isDone(f)).map(f=>f.date.slice(0,4)))].sort().reverse();
       return [['all','Всё время'], ...years.map(y=>[y,y])];
     },
-    prepare(){ return Promise.all([loadLand(), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]); },
+    prepare(){ return Promise.all([loadLand(), preloadFlags(Object.keys(visitedMap())), ...['800 50px Inter','700 50px Inter','600 30px Inter','500 30px Inter','500 30px "JetBrains Mono"'].map(f=>document.fonts.load(f).catch(()=>{}))]); },
     draw(p){ period = p; draw(); },
     name(p){ return `boarding-pass-${p}.png`; },
   };
@@ -2165,8 +2199,7 @@ function draw(){
     ctx.save(); ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fillStyle = it.more ? T_.fill : '#fff'; ctx.fill(); ctx.clip();
     ctx.textAlign='center'; ctx.textBaseline='middle';
     if(it.more){ ctx.fillStyle = theme==='light' ? '#06210f' : '#fff'; ctx.font='700 20px Inter, sans-serif'; ctx.fillText('+'+it.more, x, y+1); }
-    else if(isRegion(it.cc)) drawRegionFlag(ctx, it.cc, x-R, y-R*0.72, R*2, R*1.44);
-    else { ctx.font='60px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.fillText(flagEmoji(it.cc), x, y+3); }
+    else drawFlagCircle(ctx, it.cc, x, y, R);
     ctx.restore();
     ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.strokeStyle=T_.bg; ctx.lineWidth=4; ctx.stroke();
   });
@@ -2201,6 +2234,7 @@ ShareCards.country = {
   },
   options:{ items:Object.keys(THEMES).map(k=>[k, THEME_NAMES[k]]), get:()=>theme, set:v=>{ theme=v; lsSet('flights.countryTheme', v); } },
   async prepare(){
+    await preloadFlags(Object.keys(visitedMap()).concat(journeys.flatMap(j=>j.countries)));
     const t = lsGet('flights.countryTheme',''); if(THEMES[t]) theme = t;
     if(!LANDPOLYS.length) LANDPOLYS = Object.entries(PARTS).filter(([k])=>k!=='AQ').flatMap(([,ps])=>ps.map(p=>p.rings));
     await Promise.all(['800 50px Inter','600 30px Inter','500 30px Inter'].map(f=>document.fonts.load(f).catch(()=>{})));
