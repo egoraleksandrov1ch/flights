@@ -75,6 +75,22 @@
   .row .lead{width:50px;flex:none;display:flex;justify-content:center;align-items:center;gap:4px;min-height:40px;font-size:28px}
   .row .more{opacity:0;position:absolute;right:10px;top:10px;width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.1);display:grid;place-items:center}
   .row:hover .more{opacity:1}
+  .row.ucard{margin:6px 12px;padding:12px 12px 12px 10px;border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:hidden;
+    background:linear-gradient(100deg, rgb(var(--ac) / .34), rgb(var(--ac) / .10) 55%, rgba(255,255,255,.03));box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .row.ucard:hover{background:linear-gradient(100deg, rgb(var(--ac) / .42), rgb(var(--ac) / .14) 55%, rgba(255,255,255,.05))}
+  .row.ucard.on{border-color:rgba(255,179,71,.8);box-shadow:0 0 0 1px rgba(255,179,71,.6), 0 4px 14px rgba(0,0,0,.25)}
+  .ucard .logo{width:50px;height:50px;align-self:center}
+  .ucard .main{position:relative;z-index:1}
+  .ucard .top,.ucard .title{padding-right:96px}
+  .ucard .chips{padding-right:66px;gap:5px}
+  .ucard .ch{font-size:12px;padding:3px 8px}
+  .ucard .top{color:rgba(255,255,255,.62)}
+  .ucard .title{font-size:18px;color:#fff}
+  .ucard .ch{background:rgba(16,18,26,.55);backdrop-filter:blur(2px);border-color:rgba(255,255,255,.16)}
+  .ucard .umap{position:absolute;right:8px;bottom:6px;width:104px;height:54px;pointer-events:none}
+  .ucard .ubadge{position:absolute;right:10px;top:10px;z-index:2;font-size:11.5px;font-weight:600;color:#8fdcff;background:rgba(20,40,60,.55);
+    border:1px solid rgba(143,220,255,.25);border-radius:9px;padding:3px 8px;white-space:nowrap}
+  .ucard .more{top:auto;bottom:10px;right:10px;z-index:2}
   .chips{display:flex;gap:6px;overflow:hidden}
   .ch{font-size:12.5px;font-weight:500;color:#d7dbe4;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:3px 9px;white-space:nowrap;display:inline-flex;gap:4px;align-items:center}
   .badge{font-size:11px;font-weight:600;color:var(--accent2);background:rgba(90,209,255,.13);border-radius:6px;padding:2px 6px;white-space:nowrap}
@@ -916,6 +932,62 @@ function flightRow(a){
     <button class="more" aria-label="Ещё">${ICON.dots}</button>
   </div>`;
 }
+/** фирменный цвет авиакомпании (для карточек предстоящих рейсов); если неизвестен — цвет от кода */
+const BRAND = { W6:'#c6007e',W4:'#c6007e',W9:'#c6007e','5W':'#c6007e', FR:'#2b4fa8',RK:'#2b4fa8',AL:'#2b4fa8',RR:'#2b4fa8',
+  LO:'#2a5bd7', U2:'#ff6a13',EC:'#ff6a13',DS:'#ff6a13', LH:'#3d6bb5', KL:'#00a1de', AF:'#3561b8', BA:'#3b6db3', TK:'#d0202f',
+  PS:'#2a61b8', A3:'#1f74c0', LX:'#e30613', OS:'#e30613', SK:'#4458b0', AY:'#3a5bd0', IB:'#d7192d', VY:'#e8b500', TP:'#2f9a46',
+  EK:'#d71921', QR:'#8a1a4b', DL:'#c8102e', UA:'#1d5ad6', AA:'#0078d2', B6:'#2554c7', SU:'#1b5aa6', S7:'#79b337', PC:'#e39a00',
+  HV:'#00b85f',TO:'#00b85f', EW:'#a1005a', DY:'#d81939',D8:'#d81939', BT:'#b02a3f', RO:'#2b4b9f', JU:'#2b5ba1', OU:'#2f4f9e',
+  EI:'#00866f', LG:'#d41f35', SN:'#1a4d9c', AZ:'#007a3d', ITA:'#1b4ca1', TB:'#00a3d9', LS:'#d61f26', BY:'#1f6fd1', X3:'#e2b100',
+  '4U':'#b0006a', EN:'#c4002f', V7:'#e6007e', H4:'#c6007e', A9:'#c3242a', J2:'#d4232f', KC:'#1f63b5', HY:'#1f5aa6', FZ:'#1e7ac7',
+  G9:'#d62030', WZ:'#003da5', '6H':'#1662c6', LY:'#2a54a8', ET:'#4b9e3a', MS:'#2257a6' };
+function brandRGB(code){
+  let hex = code && BRAND[code];
+  if(!hex){ let h=0; for(const ch of (code||'??')) h=(h*31+ch.charCodeAt(0))%360; const c=(1-Math.abs(2*.45-1))*.55, x=c*(1-Math.abs((h/60)%2-1)), m=.45-c/2;
+    const [r,g,b] = h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+    return [r,g,b].map(v=>Math.round((v+m)*255)).join(' '); }
+  return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(' ');
+}
+/** мини-карта маршрута: суша вокруг двух аэропортов и дуга */
+const miniMapCache = {};
+function miniMapSVG(A, B){
+  const key = A.iata+B.iata; if(miniMapCache[key]) return miniMapCache[key];
+  const W=104, H=54, mlat = l => Math.log(Math.tan(Math.PI/4 + Math.max(-80,Math.min(80,l))*Math.PI/360))*180/Math.PI;
+  let lonB = B.lon; if(lonB-A.lon>180) lonB-=360; if(lonB-A.lon<-180) lonB+=360;
+  let x0=Math.min(A.lon,lonB), x1=Math.max(A.lon,lonB), y0=Math.min(mlat(A.lat),mlat(B.lat)), y1=Math.max(mlat(A.lat),mlat(B.lat));
+  const span = Math.max(x1-x0, (y1-y0)*W/H, 4) * 1.7, cx=(x0+x1)/2, cy=(y0+y1)/2 + span*H/W*.1;
+  const sx = W/span, X = lon => (lon-cx)*sx + W/2, Y = lat => H/2 - (mlat(lat)-cy)*sx;
+  const bl=cx-span/2, br=cx+span/2, hs=span*H/W/2;
+  let land='';
+  for(const parts of Object.values(PARTS)) for(const p of parts){
+    const [a,b,c,d]=p.bbox; if(c<bl || a>br || mlat(d)<cy-hs || mlat(b)>cy+hs) continue;
+    for(const r of p.rings){ let s=''; let px=null, py=null;
+      for(const [lon,lat] of r){ const x=X(lon).toFixed(1), y=Y(lat).toFixed(1); if(x===px && y===py) continue; s += (s?'L':'M')+x+' '+y; px=x; py=y; }
+      if(s) land += s+'Z'; }
+  }
+  const ax=X(A.lon), ay=Y(A.lat), bx=X(lonB), by=Y(B.lat), len=Math.hypot(bx-ax,by-ay);
+  let nx=(by-ay)/(len||1), ny=-(bx-ax)/(len||1); if(ny>0){ nx=-nx; ny=-ny; } const qx=(ax+bx)/2 + nx*len*.25, qy=(ay+by)/2 + ny*len*.25;
+  const svg = `<svg class="umap" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="umf" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".35" stop-color="#fff" stop-opacity="1"/></linearGradient>
+    <mask id="umm"><rect width="${W}" height="${H}" fill="url(#umf)"/></mask></defs><g mask="url(#umm)">
+    <path d="${land}" fill="rgba(255,255,255,.11)" stroke="rgba(255,255,255,.18)" stroke-width=".5" fill-rule="evenodd"/>
+    <path d="M${ax.toFixed(1)} ${ay.toFixed(1)}Q${qx.toFixed(1)} ${qy.toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".9"/>
+    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="2.6" fill="#fff"/><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="2.6" fill="#ffb347"/></g></svg>`;
+  return miniMapCache[key] = svg;
+}
+function upcomingCard(a){
+  const f=a.f, num=flightNumber(f), code=airlineCode(f);
+  return `<div class="row ucard${a.id===selected?' on':''}" data-id="${a.id}" style="--ac:${brandRGB(code)}">
+    ${miniMapSVG(a.a, a.b)}
+    <span class="ubadge">${untilLabel(f.date)}</span>
+    ${logoHTML(code)}
+    <div class="main">
+      <div class="top">${num?`<span class="num">${esc(num)}</span>`:''}<span>${a.a.iata} → ${a.b.iata}</span></div>
+      <div class="title">${esc(a.a.city||a.a.iata)} → ${esc(a.b.city||a.b.iata)}</div>
+      ${chipsHTML({...f, reg:'', seat:''}, a.km)}
+    </div>
+    <button class="more" aria-label="Ещё">${ICON.dots}</button>
+  </div>`;
+}
 function flightMenu(id){
   const a = allArcs().find(x=>x.id===id); if(!a) return [];
   return [{label:'Подробнее', act:()=>openFlightDetail(a)}, {label:'Изменить', act:()=>openFlightForm(a.f)}, '-',
@@ -942,7 +1014,7 @@ function renderFly(){
   }
   const up = arcs.filter(a=>a.up).sort((a,b)=>a.f.date.localeCompare(b.f.date));
   const past = arcs.filter(a=>!a.up).sort((a,b)=> (b.f.date||'').localeCompare(a.f.date||'') || b.id-a.id);
-  let h = up.length ? `<div class="sec blue">Предстоящие</div>` + up.map(flightRow).join('') : '';
+  let h = up.length ? `<div class="sec blue">Предстоящие рейсы</div>` + up.map(upcomingCard).join('') + '<div style="height:6px"></div>' : '';
   let cur = null;
   for(const a of past){ const y = a.f.date ? a.f.date.slice(0,4) : 'Без даты'; if(y!==cur){ cur=y; h += `<div class="sec">${y}</div>`; } h += flightRow(a); }
   list.innerHTML = h;
