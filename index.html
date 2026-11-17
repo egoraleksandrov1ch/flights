@@ -2086,7 +2086,7 @@ function draw(){
 
 <script>
 // =====================================================================
-//  Карточка «Карта стран» — Equal Earth, страны из перелётов/поездок/путешествий
+//  Карточка «Карта стран» — проекция Миллера, страны из перелётов/поездок/путешествий
 // =====================================================================
 (()=>{
 const W = 1080, H = 1350;
@@ -2118,14 +2118,13 @@ function selection(){
   return { vm, arcs, T, groups, title, sub, km, isJ };
 }
 
-// ---------- Equal Earth ----------
-const A1=1.340264, A2=-0.081106, A3=0.000893, A4=0.003796, M=Math.sqrt(3)/2;
+// ---------- проекция Миллера: привычные пропорции как на обычных картах мира (без сплющенного севера) ----------
 function ee(lon, lat){
-  const l=lon*RAD, t=Math.asin(M*Math.sin(Math.max(-90,Math.min(90,lat))*RAD)), t2=t*t, t6=t2*t2*t2;
-  return [ 2*Math.sqrt(3)*l*Math.cos(t) / (3*(A1+3*A2*t2+t6*(7*A3+9*A4*t2))), t*(A1+A2*t2+t6*(A3+A4*t2)) ];
+  const t = Math.max(-85, Math.min(85, lat)) * RAD;
+  return [ lon*RAD, 1.25*Math.log(Math.tan(Math.PI/4 + 0.4*t)) ];
 }
 const MAP = { x:20, y:250, w:1040, h:500 };
-const EX = ee(180,0)[0], YT = ee(0,84)[1], YB = ee(0,-58)[1], K = MAP.w/(2*EX);
+const EX = ee(180,0)[0], YT = ee(0,83)[1], YB = ee(0,-56)[1], K = Math.min(MAP.w/(2*EX), MAP.h/(YT-YB));
 let V = null;
 function worldView(){ const h=(YT-YB)*K; return { k:K, ox:MAP.x+MAP.w/2, oy:MAP.y+(MAP.h-h)/2+YT*K, world:true }; }
 function zoomView(boxes){
