@@ -81,7 +81,8 @@
   .row.ucard.on{border-color:rgba(255,179,71,.8);box-shadow:0 0 0 1px rgba(255,179,71,.6), 0 4px 14px rgba(0,0,0,.25)}
   .ucard .logo{width:50px;height:50px;align-self:center}
   .ucard .main{position:relative;z-index:1}
-  .ucard .top,.ucard .title{padding-right:96px}
+  .ucard .top{padding-right:96px}
+  .ucard .title{padding-right:76px}
   .ucard .chips{padding-right:66px;gap:5px}
   .ucard .ch{font-size:12px;padding:3px 8px}
   .ucard .top{color:rgba(255,255,255,.62)}
@@ -91,6 +92,14 @@
   .ucard .ubadge{position:absolute;right:10px;top:10px;z-index:2;font-size:11.5px;font-weight:600;color:#8fdcff;background:rgba(20,40,60,.55);
     border:1px solid rgba(143,220,255,.25);border-radius:9px;padding:3px 8px;white-space:nowrap}
   .ucard .more{top:auto;bottom:10px;right:10px;z-index:2}
+  .ucard .ubadge.past{color:rgba(255,255,255,.75);background:rgba(0,0,0,.25);border-color:rgba(255,255,255,.14)}
+  .ucard i.umap{display:block}
+  .ulead{width:50px;height:50px;flex:none;align-self:center;display:grid;place-items:center}
+  .ulead .rflag{border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+  .ulead.multi{grid-template-columns:1fr 1fr;gap:3px;place-content:center}
+  .ulead.multi .rflag{border-radius:3px}
+  .ulead.emoji{font-size:30px}
+  .ucard .ch .rflag{border-radius:2px;vertical-align:-1px}
   .chips{display:flex;gap:6px;overflow:hidden}
   .ch{font-size:12.5px;font-weight:500;color:#d7dbe4;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:3px 9px;white-space:nowrap;display:inline-flex;gap:4px;align-items:center}
   .badge{font-size:11px;font-weight:600;color:var(--accent2);background:rgba(90,209,255,.13);border-radius:6px;padding:2px 6px;white-space:nowrap}
@@ -919,19 +928,6 @@ function chipsHTML(f, km){
   if(f.seat) h += `<span class="ch">${SEAT_ICO}${esc(f.seat)}</span>`;
   return `<div class="chips">${h}</div>`;
 }
-function flightRow(a){
-  const f=a.f, num=flightNumber(f);
-  return `<div class="row${a.id===selected?' on':''}" data-id="${a.id}">
-    ${logoHTML(airlineCode(f))}
-    <div class="main">
-      <div class="top">${num?`<span class="num">${esc(num)}</span>`:''}<span style="opacity:.8">${a.a.iata} → ${a.b.iata}</span>
-        <span class="date">${a.up ? `<span class="badge">${untilLabel(f.date)}</span>` : (f.date ? dateShort(f.date) : '')}</span></div>
-      <div class="title${a.up?' up':''}">${esc(a.a.city||a.a.iata)} → ${esc(a.b.city||a.b.iata)}</div>
-      ${chipsHTML(f, a.km)}
-    </div>
-    <button class="more" aria-label="Ещё">${ICON.dots}</button>
-  </div>`;
-}
 /** фирменный цвет авиакомпании (для карточек предстоящих рейсов); если неизвестен — цвет от кода */
 const BRAND = { W6:'#c6007e',W4:'#c6007e',W9:'#c6007e','5W':'#c6007e', FR:'#2b4fa8',RK:'#2b4fa8',AL:'#2b4fa8',RR:'#2b4fa8',
   LO:'#2a5bd7', U2:'#ff6a13',EC:'#ff6a13',DS:'#ff6a13', LH:'#3d6bb5', KL:'#00a1de', AF:'#3561b8', BA:'#3b6db3', TK:'#d0202f',
@@ -948,45 +944,77 @@ function brandRGB(code){
     return [r,g,b].map(v=>Math.round((v+m)*255)).join(' '); }
   return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(' ');
 }
-/** мини-карта маршрута: суша вокруг двух аэропортов и дуга */
-const miniMapCache = {};
-function miniMapSVG(A, B){
-  const key = A.iata+B.iata; if(miniMapCache[key]) return miniMapCache[key];
+function hashRGB(str){
+  let h=7; for(const ch of (str||'??')) h=(h*31+ch.charCodeAt(0))%360;
+  const c=(1-Math.abs(2*.45-1))*.55, x=c*(1-Math.abs((h/60)%2-1)), m=.45-c/2;
+  const [r,g,b] = h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+  return [r,g,b].map(v=>Math.round((v+m)*255)).join(' ');
+}
+/** мини-карта для карточек: суша вокруг точек, подсвеченные страны, дуги перелётов и линии поездок.
+ *  Рисуется лениво, когда карточка доходит до экрана. */
+const MM_SPECS = {}, MM_CACHE = {};
+let mmObserver = null;
+function miniMapSlot(key, spec){ MM_SPECS[key] = spec; return MM_CACHE[key] || `<i class="umap" data-mm="${esc(key)}"></i>`; }
+function hydrateMiniMaps(root){
+  const els = root.querySelectorAll('i.umap[data-mm]'); if(!els.length) return;
+  if(!('IntersectionObserver' in window)){ els.forEach(fillMiniMap); return; }
+  mmObserver ??= new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ mmObserver.unobserve(e.target); fillMiniMap(e.target); } }), {rootMargin:'300px'});
+  els.forEach(el=>mmObserver.observe(el));
+}
+function fillMiniMap(el){ const k=el.dataset.mm; if(!el.isConnected || !MM_SPECS[k]) return; el.outerHTML = MM_CACHE[k] ??= miniMapSVG(MM_SPECS[k]); }
+function miniMapSVG({pts=[], arcs=[], lines=[], hl=[], minSpan=4, hlFit=true}){
   const W=104, H=54, mlat = l => Math.log(Math.tan(Math.PI/4 + Math.max(-80,Math.min(80,l))*Math.PI/360))*180/Math.PI;
-  let lonB = B.lon; if(lonB-A.lon>180) lonB-=360; if(lonB-A.lon<-180) lonB+=360;
-  let x0=Math.min(A.lon,lonB), x1=Math.max(A.lon,lonB), y0=Math.min(mlat(A.lat),mlat(B.lat)), y1=Math.max(mlat(A.lat),mlat(B.lat));
-  const span = Math.max(x1-x0, (y1-y0)*W/H, 4) * 1.7, cx=(x0+x1)/2, cy=(y0+y1)/2 + span*H/W*.1;
-  const sx = W/span, X = lon => (lon-cx)*sx + W/2, Y = lat => H/2 - (mlat(lat)-cy)*sx;
-  const bl=cx-span/2, br=cx+span/2, hs=span*H/W/2;
-  let land='';
-  for(const parts of Object.values(PARTS)) for(const p of parts){
-    const [a,b,c,d]=p.bbox; if(c<bl || a>br || mlat(d)<cy-hs || mlat(b)>cy+hs) continue;
-    for(const r of p.rings){ let s=''; let px=null, py=null;
-      for(const [lon,lat] of r){ const x=X(lon).toFixed(1), y=Y(lat).toFixed(1); if(x===px && y===py) continue; s += (s?'L':'M')+x+' '+y; px=x; py=y; }
-      if(s) land += s+'Z'; }
+  const ref = pts[0]?.[0] ?? (hl[0] && PARTS[hl[0]] ? (PARTS[hl[0]][0].bbox[0]+PARTS[hl[0]][0].bbox[2])/2 : 0);
+  const wrap = l => { while(l-ref>180) l-=360; while(l-ref<-180) l+=360; return l; };
+  let x0=Infinity, x1=-Infinity, y0=Infinity, y1=-Infinity;
+  const ext = (lon,lat)=>{ lon=wrap(lon); const y=mlat(lat); if(lon<x0)x0=lon; if(lon>x1)x1=lon; if(y<y0)y0=y; if(y>y1)y1=y; };
+  for(const [lon,lat] of pts) ext(lon,lat);
+  if(hlFit) for(const cc of hl){ const p=PARTS[cc]?.[0]; if(p){ ext(p.bbox[0],p.bbox[1]); ext(p.bbox[2],p.bbox[3]); } }
+  if(!isFinite(x0)){ x0=-10; x1=40; y0=mlat(35); y1=mlat(60); }
+  const span = Math.max((x1-x0)*1.5, (y1-y0)*W/H*1.5, minSpan), cx=(x0+x1)/2, cy=(y0+y1)/2 + span*H/W*.06;
+  const sx = W/span, X = lon => (wrap(lon)-cx)*sx + W/2, Y = lat => H/2 - (mlat(lat)-cy)*sx;
+  const bl=cx-span/2, br=cx+span/2, hs=span*H/W/2, R = v => Math.round(v*2)/2;
+  const ringsPath = rings => { let out=''; for(const r of rings){ let s='', px=null, py=null;
+      for(const [lon,lat] of r){ const x=R(X(lon)), y=R(Y(lat)); if(x===px && y===py) continue; s += (s?'L':'M')+x+' '+y; px=x; py=y; }
+      if(s) out += s+'Z'; } return out; };
+  const hlSet = new Set(hl); let land='', lit='';
+  for(const [cc,parts] of Object.entries(PARTS)) for(const p of parts){
+    const [a,b,c,d]=p.bbox, wa=wrap(a), wc=wa+(c-a); if(wc<bl || wa>br || mlat(d)<cy-hs || mlat(b)>cy+hs) continue;
+    const path = ringsPath(p.rings); if(hlSet.has(cc)) lit += path; else land += path;
   }
-  const ax=X(A.lon), ay=Y(A.lat), bx=X(lonB), by=Y(B.lat), len=Math.hypot(bx-ax,by-ay);
-  let nx=(by-ay)/(len||1), ny=-(bx-ax)/(len||1); if(ny>0){ nx=-nx; ny=-ny; } const qx=(ax+bx)/2 + nx*len*.25, qy=(ay+by)/2 + ny*len*.25;
-  const svg = `<svg class="umap" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="umf" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".35" stop-color="#fff" stop-opacity="1"/></linearGradient>
+  let fg='';
+  for(const [A,B] of arcs){ const ax=X(A[0]), ay=Y(A[1]), bx=X(B[0]), by=Y(B[1]), len=Math.hypot(bx-ax,by-ay);
+    let nx=(by-ay)/(len||1), ny=-(bx-ax)/(len||1); if(ny>0){ nx=-nx; ny=-ny; }
+    fg += `<path d="M${R(ax)} ${R(ay)}Q${R((ax+bx)/2+nx*len*.25)} ${R((ay+by)/2+ny*len*.25)} ${R(bx)} ${R(by)}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".9"/>`; }
+  for(const l of lines) fg += `<path d="${l.map(([lon,lat],i)=>(i?'L':'M')+R(X(lon))+' '+R(Y(lat))).join('')}" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="3 2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
+  pts.forEach(([lon,lat],i)=>{ const one=pts.length===1, last=i===pts.length-1;
+    fg += `<circle cx="${R(X(lon))}" cy="${R(Y(lat))}" r="${one?3.2:2.6}" fill="${last?'#ffb347':'#fff'}"${one?' stroke="#fff" stroke-width="1.2"':''}/>`; });
+  return `<svg class="umap" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="umf" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".35" stop-color="#fff" stop-opacity="1"/></linearGradient>
     <mask id="umm"><rect width="${W}" height="${H}" fill="url(#umf)"/></mask></defs><g mask="url(#umm)">
     <path d="${land}" fill="rgba(255,255,255,.11)" stroke="rgba(255,255,255,.18)" stroke-width=".5" fill-rule="evenodd"/>
-    <path d="M${ax.toFixed(1)} ${ay.toFixed(1)}Q${qx.toFixed(1)} ${qy.toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".9"/>
-    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="2.6" fill="#fff"/><circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="2.6" fill="#ffb347"/></g></svg>`;
-  return miniMapCache[key] = svg;
+    ${lit ? `<path d="${lit}" fill="rgba(255,255,255,.36)" stroke="rgba(255,255,255,.7)" stroke-width=".6" fill-rule="evenodd"/>` : ''}${fg}</g></svg>`;
 }
-function upcomingCard(a){
+/** общий каркас карточки */
+function uCard({cls='', attrs='', ac, map, badge, badgeCls='', lead, top, title, chips, more=true}){
+  return `<div class="row ucard ${cls}" ${attrs} style="--ac:${ac}">${map||''}${badge?`<span class="ubadge ${badgeCls}">${badge}</span>`:''}
+    ${lead}<div class="main"><div class="top">${top||''}</div><div class="title">${title}</div>${chips||''}</div>
+    ${more?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
+}
+const chipRow = arr => `<div class="chips">${arr.filter(Boolean).map(x=>`<span class="ch">${x}</span>`).join('')}</div>`;
+function flagsLead(ccs){
+  const c = ccs.slice(0,4);
+  if(c.length<=1) return `<div class="ulead">${c[0]?flagHTML(c[0],34):'🌍'}</div>`;
+  return `<div class="ulead multi">${c.map(cc=>flagHTML(cc,20)).join('')}</div>`;
+}
+function flightCard(a){
   const f=a.f, num=flightNumber(f), code=airlineCode(f);
-  return `<div class="row ucard${a.id===selected?' on':''}" data-id="${a.id}" style="--ac:${brandRGB(code)}">
-    ${miniMapSVG(a.a, a.b)}
-    <span class="ubadge">${untilLabel(f.date)}</span>
-    ${logoHTML(code)}
-    <div class="main">
-      <div class="top">${num?`<span class="num">${esc(num)}</span>`:''}<span>${a.a.iata} → ${a.b.iata}</span></div>
-      <div class="title">${esc(a.a.city||a.a.iata)} → ${esc(a.b.city||a.b.iata)}</div>
-      ${chipsHTML({...f, reg:'', seat:''}, a.km)}
-    </div>
-    <button class="more" aria-label="Ещё">${ICON.dots}</button>
-  </div>`;
+  return uCard({cls:a.id===selected?'on':'', attrs:`data-id="${a.id}"`, ac:brandRGB(code),
+    map: miniMapSlot('f'+a.a.iata+a.b.iata, {pts:[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]], arcs:[[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]]]}),
+    badge: a.up ? untilLabel(f.date) : (f.date ? dateShort(f.date) : ''), badgeCls: a.up?'':'past',
+    lead: logoHTML(code),
+    top: `${num?`<span class="num">${esc(num)}</span>`:''}<span>${a.a.iata} → ${a.b.iata}</span>`,
+    title: `${esc(a.a.city||a.a.iata)} → ${esc(a.b.city||a.b.iata)}`,
+    chips: chipsHTML({...f, reg:'', seat:''}, a.km)});
 }
 function flightMenu(id){
   const a = allArcs().find(x=>x.id===id); if(!a) return [];
@@ -1014,10 +1042,10 @@ function renderFly(){
   }
   const up = arcs.filter(a=>a.up).sort((a,b)=>a.f.date.localeCompare(b.f.date));
   const past = arcs.filter(a=>!a.up).sort((a,b)=> (b.f.date||'').localeCompare(a.f.date||'') || b.id-a.id);
-  let h = up.length ? `<div class="sec blue">Предстоящие рейсы</div>` + up.map(upcomingCard).join('') + '<div style="height:6px"></div>' : '';
+  let h = up.length ? `<div class="sec blue">Предстоящие рейсы</div>` + up.map(flightCard).join('') + '<div style="height:6px"></div>' : '';
   let cur = null;
-  for(const a of past){ const y = a.f.date ? a.f.date.slice(0,4) : 'Без даты'; if(y!==cur){ cur=y; h += `<div class="sec">${y}</div>`; } h += flightRow(a); }
-  list.innerHTML = h;
+  for(const a of past){ const y = a.f.date ? a.f.date.slice(0,4) : 'Без даты'; if(y!==cur){ cur=y; h += `<div class="sec">${y}</div>`; } h += flightCard(a); }
+  list.innerHTML = h; hydrateMiniMaps(list);
   list.querySelectorAll('.row').forEach(el=>{
     const id = Number(el.dataset.id);
     el.onclick = e=>{ if(e.target.closest('.more')){ e.stopPropagation(); popMenu(e.target.closest('.more'), flightMenu(id)); return; } selectFlight(id); };
@@ -1030,27 +1058,30 @@ $('#flyShare').onclick = ()=>ShareModal.open('fly');
 
 // ---------- страница Country ----------
 function journeyRow(j){
-  const n=journeyArcs(j).length, t=journeyTrips(j).length, up = j.start > todayStr();
-  return `<div class="row${selJourney===j.id?' on':''}" data-j="${j.id}" style="align-items:center">
-    <div class="lead" style="font-size:18px;display:flex;gap:4px;flex:none;margin-right:4px">${j.countries.slice(0,3).map(cc=>flagHTML(cc,18)).join('')}</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px;display:flex;gap:8px;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis">${esc(journeyTitle(j))}</span>${up?`<span class="badge">${untilLabel(j.start)}</span>`:''}</div>
-      <div class="sub">${[journeyDates(j), n?`✈ ${n}`:null, t?`🚌 ${t}`:null].filter(Boolean).join(' · ')}</div></div>
-    <button class="more" aria-label="Ещё">${ICON.dots}</button></div>`;
+  const arcs=journeyArcs(j), n=arcs.length, ts=journeyTrips(j), t=ts.length, up = j.start > todayStr();
+  const days = Math.round((new Date(j.end)-new Date(j.start))/864e5)+1;
+  const dest = j.countries.find(cc=>!homeAt(cc,null,null,j.start)) || j.countries[0];
+  const pts = [...new Map(arcs.flatMap(a=>[a.a,a.b]).map(p=>[p.iata,[p.lon,p.lat]])).values()];
+  return uCard({cls:selJourney===j.id?'on':'', attrs:`data-j="${j.id}"`, ac:hashRGB(dest),
+    map: miniMapSlot('j'+j.id+j.countries.join(), {hl:j.countries, arcs:arcs.map(a=>[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]])}),
+    badge: up ? untilLabel(j.start) : '', lead: flagsLead(j.countries), top: esc(journeyDates(j)), title: esc(journeyTitle(j)),
+    chips: chipRow([`${days} ${plural(days,'день','дня','дней')}`, n?`✈ ${n}`:null, t?`🚌 ${t}`:null])});
 }
 function tripRow(legs){
   const m = MODES[legs[0].mode] || MODES.bus, km = legs.reduce((s,l)=>s+(+l.km||dist(l.from,l.to)),0);
-  return `<div class="row" data-t="${legs[0].id}" style="align-items:center">
-    <div class="lead" style="font-size:22px">${m.ico}</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(legsTitle(legs))}</div>
-      <div class="sub">${[m.name, legs[0].date?fmtDate(legs[0].date):null, fmtKm(km)+' км', legsCountries(legs).map(flagEmoji).join(' ')].filter(Boolean).join(' · ')}</div></div>
-    <button class="more" aria-label="Ещё">${ICON.dots}</button></div>`;
+  const pts = [[+legs[0].from.lon,+legs[0].from.lat], ...legs.map(l=>[+l.to.lon,+l.to.lat])], ccs = legsCountries(legs);
+  return uCard({attrs:`data-t="${legs[0].id}"`, ac:hashRGB(ccs[ccs.length-1]||m.name),
+    map: miniMapSlot('t'+legs[0].id, {pts, lines:[pts], minSpan:3}),
+    badge: legs[0].date ? dateShort(legs[0].date) : '', badgeCls:'past',
+    lead: `<div class="ulead emoji">${m.ico}</div>`, top: [m.name, legs[0].note?esc(legs[0].note):null].filter(Boolean).join(' · '),
+    title: esc(legsTitle(legs)), chips: chipRow([fmtKm(km)+' км', legs.length>1?`${legs.length} ${plural(legs.length,'участок','участка','участков')}`:null, ccs.map(cc=>flagHTML(cc,14)).join(' ')])});
 }
 function countryRow(v){
-  const parts = [v.flights?`✈ ${v.flights}`:null, v.trips?`наземных поездок: ${v.trips}`:null, v.journeys?`путешествий: ${v.journeys}`:null, v.cities?`городов вручную: ${v.cities}`:null, v.manual?'отмечено вручную':null, isDisputed(v.cc)?'спорная территория':null].filter(Boolean);
-  return `<div class="row${selCountry===v.cc?' on green':''}" data-c="${v.cc}" style="align-items:center">
-    <div class="lead">${flagHTML(v.cc,28)}</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(countryName(v.cc))}</div><div class="sub">${parts.join(' · ')}</div></div>
-    ${v.manual?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
+  const cont = CONT_OF[v.cc] || CONT_OF[REGIONS[v.cc]?.[1]] || '';
+  return uCard({cls:selCountry===v.cc?'on':'', attrs:`data-c="${v.cc}"`, ac:hashRGB(v.cc), more:!!v.manual,
+    map: miniMapSlot('c'+v.cc, {hl:[v.cc], minSpan:6}), badge: isDisputed(v.cc)?'спорная':'', badgeCls:'past',
+    lead: flagsLead([v.cc]), top: esc(cont), title: esc(countryName(v.cc)),
+    chips: chipRow([v.flights?`✈ ${v.flights}`:null, v.trips?`🚌 ${v.trips}`:null, v.journeys?`🧳 ${v.journeys}`:null, v.cities?`📍 ${v.cities}`:null, v.manual?'вручную':null])});
 }
 function renderCountry(){
   document.querySelectorAll('#layerSeg button').forEach(b=>b.classList.toggle('on', b.dataset.l===layer));
@@ -1080,7 +1111,7 @@ function renderCountry(){
     if(terr.length) h += `<div class="sec">Территории и острова</div>` + terr.map(countryRow).join('');
     if(!h) h = `<div class="empty">Страны появятся из перелётов.<br>Нажмите «+», чтобы отметить страну вручную.</div>`;
   }
-  list.innerHTML = h;
+  list.innerHTML = h; hydrateMiniMaps(list);
   list.querySelectorAll('[data-city]').forEach(el=>{
     const cm = currentCities().find(x=>x.key===el.dataset.city);
     const menu = ()=> cm?.manual ? [{label:'Снять отметку', danger:true, act:()=>{ const ids=new Set(cm.manual); mcities=mcities.filter(x=>!ids.has(x.id)); saveCities(); }}] : [];
@@ -2437,11 +2468,13 @@ function currentCities(){
   return citiesFrom(doneArcs(), trips.filter(doneTrip), mcities);
 }
 function cityRow(c){
-  if(c.home) return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">🏠</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">дом${c.visits?` · поездок сюда, когда жили не здесь: ${c.visits}`:''}</div></div></div>`;
-  const sub = [c.visits>1 ? `${c.visits} ${plural(c.visits,'визит','визита','визитов')}` : null, c.manual?'отмечено вручную':null, c.air?'✈':null, (c.ground-(c.manual?.length||0))>0?'🚌':null, c.last?dateShort(c.last):null].filter(Boolean).join(' · ');
-  return `<div class="row city-row" data-city="${esc(c.key)}" style="align-items:center"><div class="lead">${flagHTML(c.cc,22)}</div>
-    <div class="main"><div class="title" style="font-size:16px;margin:0 0 3px">${esc(c.name)}</div><div class="sub">${esc(sub)}</div></div>${c.manual?`<button class="more" aria-label="Ещё">${ICON.dots}</button>`:''}</div>`;
+  const map = miniMapSlot('y'+c.key, {pts:[[c.lon,c.lat]], hl:[c.cc], hlFit:false, minSpan:7});
+  if(c.home) return uCard({cls:'city-row', attrs:`data-city="${esc(c.key)}"`, ac:'120 130 150', more:false, map,
+    lead:`<div class="ulead emoji">🏠</div>`, top: esc(countryName(c.cc)), title: esc(c.name),
+    chips: chipRow(['дом', c.visits?`поездок сюда: ${c.visits}`:null])});
+  return uCard({cls:'city-row', attrs:`data-city="${esc(c.key)}"`, ac:hashRGB(c.cc), more:!!c.manual, map,
+    badge: c.last?dateShort(c.last):'', badgeCls:'past', lead: flagsLead([c.cc]), top: esc(countryName(c.cc)), title: esc(c.name),
+    chips: chipRow([`${c.visits} ${plural(c.visits,'визит','визита','визитов')}`, c.air?'✈':null, (c.ground-(c.manual?.length||0))>0?'🚌':null, c.manual?'вручную':null])});
 }
 
 const CONTINENTS = {
