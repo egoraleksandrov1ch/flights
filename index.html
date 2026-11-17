@@ -980,23 +980,34 @@ function hydrateMiniMaps(root){
 function fillMiniMap(el){ const k=el.dataset.mm; if(!el.isConnected || !MM_SPECS[k]) return; el.outerHTML = MM_CACHE[k] ??= miniMapSVG(MM_SPECS[k]); }
 function miniMapSVG({pts=[], arcs=[], lines=[], hl=[], minSpan=4, hlFit=true, W=104, H=54, fade=true, cls='umap'}){
   const mlat = l => Math.log(Math.tan(Math.PI/4 + Math.max(-80,Math.min(80,l))*Math.PI/360))*180/Math.PI;
-  const ref = pts[0]?.[0] ?? (hl[0] && PARTS[hl[0]] ? (PARTS[hl[0]][0].bbox[0]+PARTS[hl[0]][0].bbox[2])/2 : 0);
+  const firstHl = hl.map(cc=>PARTS[cc]?.[0]?.rings[0]).find(Boolean);
+  const ref = pts[0]?.[0] ?? (firstHl ? firstHl[0][0] : 15);
   const wrap = l => { while(l-ref>180) l-=360; while(l-ref<-180) l+=360; return l; };
+  /** кольцо без скачков через 180°: каждая точка — рядом с предыдущей */
+  const unwrap = r => { const out=new Array(r.length); let prev=wrap(r[0][0]); out[0]=prev;
+    for(let i=1;i<r.length;i++){ let l=r[i][0]; while(l-prev>180) l-=360; while(l-prev<-180) l+=360; out[i]=prev=l; } return out; };
   let x0=Infinity, x1=-Infinity, y0=Infinity, y1=-Infinity;
-  const ext = (lon,lat)=>{ lon=wrap(lon); const y=mlat(lat); if(lon<x0)x0=lon; if(lon>x1)x1=lon; if(y<y0)y0=y; if(y>y1)y1=y; };
-  for(const [lon,lat] of pts) ext(lon,lat);
-  if(hlFit) for(const cc of hl){ const p=PARTS[cc]?.[0]; if(p){ ext(p.bbox[0],p.bbox[1]); ext(p.bbox[2],p.bbox[3]); } }
+  const extY = lat => { const y=mlat(lat); if(y<y0)y0=y; if(y>y1)y1=y; };
+  const extX = lon => { if(lon<x0)x0=lon; if(lon>x1)x1=lon; };
+  for(const [lon,lat] of pts){ extX(wrap(lon)); extY(lat); }
+  if(hlFit) for(const cc of hl){ const r=PARTS[cc]?.[0]?.rings[0]; if(!r) continue;
+    const ls=unwrap(r); let lo=Math.min(...ls), hi=Math.max(...ls);
+    const sh = Math.round(((ref)-(lo+hi)/2)/360)*360; extX(lo+sh); extX(hi+sh); for(const q of r) extY(q[1]); }
   if(!isFinite(x0)){ x0=-10; x1=40; y0=mlat(35); y1=mlat(60); }
   const span = Math.max((x1-x0)*1.5, (y1-y0)*W/H*1.5, minSpan), cx=(x0+x1)/2, cy=(y0+y1)/2 + span*H/W*.06;
-  const sx = W/span, X = lon => (wrap(lon)-cx)*sx + W/2, Y = lat => H/2 - (mlat(lat)-cy)*sx;
+  const sx = W/span, X = lon => (wrap(lon)-cx)*sx + W/2, XU = lon => (lon-cx)*sx + W/2, Y = lat => H/2 - (mlat(lat)-cy)*sx;
   const bl=cx-span/2, br=cx+span/2, hs=span*H/W/2, R = v => Math.round(v*2)/2;
-  const ringsPath = rings => { let out=''; for(const r of rings){ let s='', px=null, py=null;
-      for(const [lon,lat] of r){ const x=R(X(lon)), y=R(Y(lat)); if(x===px && y===py) continue; s += (s?'L':'M')+x+' '+y; px=x; py=y; }
-      if(s) out += s+'Z'; } return out; };
+  const ringPath = r => { const ls=unwrap(r); let lo=Infinity, hi=-Infinity; for(const l of ls){ if(l<lo)lo=l; if(l>hi)hi=l; }
+    const sh = Math.round((cx-(lo+hi)/2)/360)*360; if(hi+sh<bl || lo+sh>br) return '';
+    let s='', px=null, py=null;
+    for(let i=0;i<r.length;i++){ const x=R(XU(ls[i]+sh)), y=R(Y(r[i][1])); if(x===px && y===py) continue; s += (s?'L':'M')+x+' '+y; px=x; py=y; }
+    return s ? s+'Z' : ''; };
   const hlSet = new Set(hl); let land='', lit='';
   for(const [cc,parts] of Object.entries(PARTS)) for(const p of parts){
-    const [a,b,c,d]=p.bbox, wa=wrap(a), wc=wa+(c-a); if(wc<bl || wa>br || mlat(d)<cy-hs || mlat(b)>cy+hs) continue;
-    const path = ringsPath(p.rings); if(hlSet.has(cc)) lit += path; else land += path;
+    const [a,b,c,d]=p.bbox; if(mlat(d)<cy-hs || mlat(b)>cy+hs) continue;
+    if(c-a<180){ const sh=Math.round((cx-(a+c)/2)/360)*360; if(c+sh<bl-5 || a+sh>br+5) continue; }
+    let path=''; for(const r of p.rings) path += ringPath(r);
+    if(hlSet.has(cc)) lit += path; else land += path;
   }
   let fg='';
   for(const [A,B] of arcs){ const ax=X(A[0]), ay=Y(A[1]), bx=X(B[0]), by=Y(B[1]), len=Math.hypot(bx-ax,by-ay);
