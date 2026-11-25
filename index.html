@@ -104,6 +104,7 @@
   .ulead.multi{grid-template-columns:1fr 1fr;gap:3px;place-content:center}
   .ulead.multi .rflag{border-radius:3px}
   .ulead.emoji{font-size:30px}
+  .ch.conn{color:#8fdcff;border-color:rgba(143,220,255,.35)}
   .ucard .ch .rflag{border-radius:2px;vertical-align:-1px}
   .chips{display:flex;gap:6px;overflow:hidden}
   .ch{font-size:12.5px;font-weight:500;color:#d7dbe4;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:3px 9px;white-space:nowrap;display:inline-flex;gap:4px;align-items:center}
@@ -552,7 +553,30 @@ function mkArc(f){
   const a=BY_IATA[f.from], b=BY_IATA[f.to]; if(!a||!b) return null;
   return { f, a, b, km:dist(a,b), up: !!f.date && f.date > todayStr(), id:f.id };
 }
-const allArcs = () => flights.map(mkArc).filter(Boolean);
+const allArcs = () => markTransit(flights.map(mkArc).filter(Boolean));
+/** пересадки: у рейса с f.conn прилёт — транзит, и вылет следующего рейса из того же аэропорта (в течение 2 дней) тоже.
+ *  Транзитные аэропорты остаются в счёте аэропортов, но страна и город не засчитываются. */
+function markTransit(arcs){
+  const key = x => (x.f.date||'') + ' ' + (x.f.depTime||'');
+  const sorted = [...arcs].sort((x,y)=>key(x).localeCompare(key(y)));
+  for(const x of arcs){
+    if(!x.f.conn) continue;
+    x.transitTo = true;
+    const nx = sorted.find(y=> y!==x && !y.transitFrom && y.a.iata===x.b.iata && x.f.date && y.f.date
+      && key(y) >= key(x) && (new Date(y.f.date) - new Date(x.f.date)) <= 2*864e5);
+    if(nx){ nx.transitFrom = true; nx.prev = x; x.next = nx; }
+  }
+  return arcs;
+}
+/** места рейса, которые засчитываются как посещённые (без транзита) */
+const placesOf = a => [a.transitFrom ? null : a.a, a.transitTo ? null : a.b].filter(Boolean);
+/** время пересадки в минутах, если известны время прилёта и следующего вылета */
+function layoverMin(a){
+  const n = a.next; if(!n || !a.f.arrTime || !n.f.depTime || !a.f.date || !n.f.date) return 0;
+  const t = (d,h)=>{ const [H,M]=h.split(':').map(Number); return new Date(d+'T00:00Z').getTime()/6e4 + H*60 + M; };
+  let arr = t(a.f.date, a.f.arrTime); if(a.f.arrTime < (a.f.depTime||'00:00')) arr += 1440;   // прилёт на следующий день
+  const v = t(n.f.date, n.f.depTime) - arr; return v > 0 ? v : 0;
+}
 const doneArcs = () => allArcs().filter(x=>!x.up);
 const arcMin = a => a.f.durMin > 0 ? a.f.durMin : estMin(a.km);
 
@@ -587,7 +611,7 @@ function collect(arcs, js, mn, ts){
     if(kind==='f') v.flights++; if(kind==='t') v.trips++;
     if(lon!=null) v.pts.push([lon,lat]); if(date && date>v.last) v.last=date;
   };
-  for(const a of arcs) for(const p of [a.a, a.b])
+  for(const a of arcs) for(const p of placesOf(a))
     for(const cc of placeCodes(p.country, p.lon, p.lat)) touch(cc, p.lon, p.lat, a.f.date, 'f');
   for(const t of (ts||[])) for(const p of [t.from, t.to]){
     const cc=(p.cc||'').toUpperCase(); if(!cc) continue;
@@ -1041,7 +1065,7 @@ function flightCard(a){
     lead: logoHTML(code),
     top: `${num?`<span class="num">${esc(num)}</span>`:''}<span>${a.a.iata} → ${a.b.iata}</span>`,
     title: `${esc(a.a.city||a.a.iata)} → ${esc(a.b.city||a.b.iata)}`,
-    chips: chipsHTML({...f, reg:'', seat:''}, a.km)});
+    chips: chipsHTML({...f, reg:'', seat:''}, a.km).replace('<div class="chips">', a.transitTo ? `<div class="chips"><span class="ch conn">⇄ ${(l=>l?hm(l):T('пересадка'))(layoverMin(a))}</span>` : '<div class="chips">')});
 }
 function flightMenu(id){
   const a = allArcs().find(x=>x.id===id); if(!a) return [];
@@ -1053,7 +1077,7 @@ function deleteFlight(id){ if(selected===id) selected=null; flights = flights.fi
 function renderFly(){
   $('#yearBtn').innerHTML = ICON.cal + esc(yearLabel(year));
   const arcs = yearArcs(), done = arcs.filter(a=>!a.up);
-  const ap = new Set(done.flatMap(a=>[a.a.iata,a.b.iata])), cs = new Set(done.flatMap(a=>[a.a.country,a.b.country]));
+  const ap = new Set(done.flatMap(a=>[a.a.iata,a.b.iata])), cs = new Set(done.flatMap(a=>placesOf(a).map(p=>p.country)));
   const km = done.reduce((s,a)=>s+a.km,0);
   $('#flyTiles').innerHTML = [[done.length, plural(done.length,'рейс','рейса','рейсов')],[kmShort(km),T('км')],[ap.size,T('аэроп.')],[cs.size, plural(cs.size,'страна','страны','стран')]]
     .map(([v,l])=>`<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
@@ -1305,15 +1329,19 @@ function pickAirport(title, cb){
 }
 
 // ---------- форма перелёта ----------
-function openFlightForm(editing){
-  const lastTo = flights[flights.length-1]?.to;
+function openFlightForm(editing, preset){
+  const lastTo = preset?.from || flights[flights.length-1]?.to;
   const s = editing ? { from:BY_IATA[editing.from], to:BY_IATA[editing.to], hasDate:!!editing.date, date:editing.date||todayStr(), airline:editing.airline||'',
       aircraft:editing.aircraft||'', reg:editing.reg||'', seat:editing.seat||'', cabin:editing.cabin||'', depTime:editing.depTime||'', arrTime:editing.arrTime||'', durMin:editing.durMin||0 }
-    : { from: lastTo ? BY_IATA[lastTo] : null, to:null, hasDate:true, date:todayStr(), airline:'', aircraft:'', reg:'', seat:'', cabin:'', depTime:'', arrTime:'', durMin:0 };
+    : { from: lastTo ? BY_IATA[lastTo] : null, to:null, hasDate: preset ? preset.hasDate : true, date: preset?.date || todayStr(), airline:'', aircraft:'', reg:'', seat:'', cabin:'', depTime:'', arrTime:'', durMin:0 };
+  s.conn = !!editing?.conn;
   let found=[], searching=false, searched=false, apiError=null;
   const m = openModal({title: editing ? T('Изменить перелёт') : T('Новый перелёт'), right: editing ? T('Сохранить') : T('Добавить'), cls:'tall', onRight: save});
   m.body.innerHTML = `
+    ${preset?.note ? `<div class="gfoot" style="color:var(--accent);margin-top:4px">⇄ ${esc(preset.note)}</div>` : ''}
     <div class="grp"><button class="gi" data-pick="from"></button><button class="gi" data-pick="to"></button></div>
+    <div class="grp"><div class="gi"><span>⇄ <span id="ffConnL"></span></span><span class="toggle" id="ffConnT"></span></div></div>
+    <div class="gfoot">${T('Дальше лечу стыковочным рейсом и не выхожу в город: страна и город пересадки не засчитаются. Если выходили в город — оставьте выключенным.')}${editing ? '' : T(' После сохранения сразу откроется следующий рейс.')}</div>
     <div class="grp"><div class="gi"><span>${T('Дата')}</span><span class="toggle" id="ffDateT"></span></div><div class="gi" id="ffDateRow"><span class="lbl">${T('Дата вылета')}</span><input type="date" id="ffDate" style="text-align:right;color-scheme:dark"></div></div>
     <div id="ffSched"></div>
     <div class="ghead">${T('Рейс')}</div>
@@ -1334,6 +1362,7 @@ function openFlightForm(editing){
   function paint(){
     q('[data-pick="from"]').innerHTML = field(T('Откуда'), s.from); q('[data-pick="to"]').innerHTML = field(T('Куда'), s.to);
     q('#ffDateT').classList.toggle('on', s.hasDate); q('#ffDateRow').hidden = !s.hasDate;
+    q('#ffConnT').classList.toggle('on', s.conn); q('#ffConnL').textContent = s.to ? `${T('Пересадка в')} ${s.to.city||s.to.iata}` : T('Пересадка');
     const p = parseAirline(s.airline);
     q('#ffLogo').innerHTML = logoHTML(p?.code, 'sm').replace('logo sm','logo sm" style="width:30px;height:30px');
     const al = p?.code && AIRLINES[p.code];
@@ -1392,6 +1421,7 @@ function openFlightForm(editing){
   }
   B.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>pickAirport(b.dataset.pick==='from'?T('Откуда'):T('Куда'), a=>{ s[b.dataset.pick]=a; found=[]; searched=false; paint(); }));
   q('#ffDateT').parentElement.onclick = ()=>{ s.hasDate=!s.hasDate; paint(); };
+  q('#ffConnT').parentElement.onclick = ()=>{ s.conn=!s.conn; paint(); };
   q('#ffDate').onchange = e=>{ s.date = e.target.value || todayStr(); found=[]; searched=false; paint(); };
   q('#ffAirline').oninput = e=>{ s.airline=e.target.value; paintAir(); };
   let airT=null; function paintAir(){ clearTimeout(airT); airT=setTimeout(()=>{ const f=document.activeElement; paint(); f?.focus?.(); }, 250); }
@@ -1402,16 +1432,23 @@ function openFlightForm(editing){
     if(!s.from || !s.to) return;
     const t = x=>(x||'').trim();
     const f = { id: editing?.id ?? Date.now(), from:s.from.iata, to:s.to.iata, date: s.hasDate ? s.date : '', airline:t(s.airline),
-      aircraft:t(s.aircraft).toUpperCase(), reg:t(s.reg).toUpperCase(), seat:t(s.seat).toUpperCase(), cabin:s.cabin, depTime:s.depTime, arrTime:s.arrTime, durMin:s.durMin };
+      aircraft:t(s.aircraft).toUpperCase(), reg:t(s.reg).toUpperCase(), seat:t(s.seat).toUpperCase(), cabin:s.cabin, depTime:s.depTime, arrTime:s.arrTime, durMin:s.durMin, conn: s.conn || undefined };
     if(editing){ const i=flights.findIndex(x=>x.id===editing.id); if(i>=0) flights[i]={...flights[i], ...f}; }
     else flights.push(f);
     m.close(); saveFlights();
     if(!editing){ page===0 || setPage(0); selected=null; selectFlight(f.id); }
+    if(!editing && s.conn) setTimeout(()=>openFlightForm(null, {from:f.to, date:f.date, hasDate:!!f.date, note:`${T('Следующий рейс после пересадки в')} ${s.to.city||s.to.iata}`}), 300);
   }
   paint();
 }
 
 // ---------- карточка рейса ----------
+function transitCard(a){
+  const rows = [];
+  if(a.transitTo){ const l = layoverMin(a); rows.push(`⇄ <b>${T('Пересадка в')} ${esc(a.b.city||a.b.iata)}</b>${l?' · '+hm(l):''}${a.next?` → ${a.next.b.iata}`:''}`); }
+  if(a.transitFrom && a.prev){ const l = layoverMin(a.prev); rows.push(`⇄ <b>${T('После пересадки в')} ${esc(a.a.city||a.a.iata)}</b>${l?' · '+hm(l):''} · ${a.prev.a.iata} →`); }
+  return rows.length ? `<div class="card"><div style="display:grid;gap:6px">${rows.map(r=>`<div>${r}</div>`).join('')}</div><div class="gfoot" style="margin:8px 0 0">${T('страна и город пересадки не засчитываются')}</div></div>` : '';
+}
 function openFlightDetail(a){
   const f=a.f, code=airlineCode(f), al = code && AIRLINES[code];
   const m = openModal({title:'', left:null, right:T('Готово'), cls:'tall'}); m.el.querySelector('.mbox').style.setProperty('--tint', brandRGB(code));
@@ -1426,6 +1463,7 @@ function openFlightDetail(a){
       <div style="font-size:24px;font-weight:700">${esc(a.a.city)} → ${esc(a.b.city)}</div></div></div>
     <div class="card hero">${miniMapSVG({pts:[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]], arcs:[[[a.a.lon,a.a.lat],[a.b.lon,a.b.lat]]], W:320, H:120, fade:false, cls:'hmap'})}<div class="route">${end(a.a,true)}<div class="mid"><div class="pl">✈︎</div>${fmtKm(a.km)} ${T('км')}<br>${f.durMin>0?hm(f.durMin):'≈'+hm(estMin(a.km))}${f.depTime?`<br><b style="color:var(--text);font-size:13px">${f.depTime} → ${f.arrTime}</b>`:''}</div>${end(a.b,false)}</div>
       ${a.up?`<div style="text-align:center;margin-top:10px"><span class="badge">${untilLabel(f.date)}</span></div>`:''}<div style="margin-top:12px">${chipsHTML(f,a.km)}</div></div>
+    ${transitCard(a)}
     ${(f.aircraft||f.reg||f.seat||f.cabin) ? `<div class="card"><h3>${T('Самолёт и место')}</h3>${planeImg(AircraftNames.full(f.aircraft),'plane hero')}${grid([[T('Самолёт'), AircraftNames.full(f.aircraft) || f.aircraft],[T('Борт'),f.reg],[T('Класс'),f.cabin?cabinName(f.cabin):''],[T('Место'),f.seat]])}</div>` : ''}
     ${al ? `<div class="card"><h3>${logoHTML(code,'sm').replace('logo sm','logo sm" style="width:34px;height:34px')}${esc(al[0])}</h3>${grid([[T('Позывной'),al[2]],['ICAO',al[1]],['IATA',code]])}</div>`
          : f.airline ? `<div class="card"><h3>${T('Авиакомпания')}</h3><b>${esc(f.airline)}</b></div>` : ''}
@@ -1788,7 +1826,8 @@ function computeStats(period){
   const inc=(o,k,label,extra=0)=>{ const v=o[k] ??= {key:k,label,n:0,extra:0}; v.n++; v.extra+=extra; };
   for(const a of arcs){
     const mins = arcMin(a); S.km+=a.km; S.minutes+=mins;
-    for(const p of [a.a,a.b]){ inc(ap,p.iata,p.iata); if(!S.countries.includes(p.country)) S.countries.push(p.country); }
+    for(const p of [a.a,a.b]) inc(ap,p.iata,p.iata);
+    for(const p of placesOf(a)) if(!S.countries.includes(p.country)) S.countries.push(p.country);
     a.a.country===a.b.country ? S.domestic++ : S.international++;
     const code=airlineCode(a.f), name=airlineName(a.f)||T('Не указана'); inc(al, code||name, name, a.km);
     const full=AircraftNames.full(a.f.aircraft);
@@ -1812,7 +1851,7 @@ function computeStats(period){
   S.cabins = [['E',T('Эконом')],['P',T('Премиум')],['B',T('Бизнес')],['F',T('Первый')]].map(([k,l])=>({key:k,label:l,n:cab[k]||0}));
   S.seatTypes = [['window',T('Окно'),'🪟'],['middle',T('Середина'),'👥'],['aisle',T('Проход'),'🚶']].map(([k,l,i])=>({key:k,label:l,ico:i,n:st[k]||0}));
   const fav = Object.entries(sc).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))[0]; S.favoriteSeat = fav || null;
-  const first={}; for(const a of all) if(a.f.date) for(const p of [a.a,a.b]) if(!first[p.country] || a.f.date<first[p.country]) first[p.country]=a.f.date;
+  const first={}; for(const a of all) if(a.f.date) for(const p of placesOf(a)) if(!first[p.country] || a.f.date<first[p.country]) first[p.country]=a.f.date;
   const ny={}; for(const d of Object.values(first)) ny[d.slice(0,4)]=(ny[d.slice(0,4)]||0)+1;
   S.newCountries = Object.keys(ny).sort().map(k=>({label:k,n:ny[k]}));
   return S;
@@ -1972,7 +2011,7 @@ function compute(){
     const k=[f.from,f.to].sort().join('-'); routes[k]=(routes[k]||0)+1;
     const al=(f.airline||'').replace(/\s*\d+\s*$/,'').trim().toLowerCase(); if(al) airlines.add(al);
   }
-  for(const f of [...list].reverse()){ const c=BY_IATA[f.to].country; if(c && !countries.includes(c)) countries.push(c); }
+  for(const f of [...list].reverse()){ if(f.conn) continue; const c=BY_IATA[f.to].country; if(c && !countries.includes(c)) countries.push(c); }
   const top = o => Object.entries(o).sort((a,b)=>b[1]-a[1])[0];
   const topAp = Object.entries(ap).sort((a,b)=>b[1]-a[1]);
   const home = topAp[0]?.[0] || '---';
@@ -2474,7 +2513,7 @@ const ShareModal = (()=>{
 function citiesFrom(arcs, ts, extra=[]){
   const ccAt = (cc, lon, lat) => disputedAt(lon, lat) || cc;
   const pts = extra.map(c=>({name:c.name, cc:ccAt(c.cc, +c.lon, +c.lat), lat:+c.lat, lon:+c.lon, date:c.date||'', air:false, manual:c.id}));
-  for(const a of arcs) for(const p of [a.a,a.b]) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:ccAt(p.country, p.lon, p.lat), lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
+  for(const a of arcs) for(const p of placesOf(a)) pts.push({name:(p.city||p.iata).split('/')[0].trim(), cc:ccAt(p.country, p.lon, p.lat), lat:p.lat, lon:p.lon, date:a.f.date||'', air:true});
   for(const t of ts) for(const p of [t.from,t.to]) if(p && p.lat!=null) pts.push({name:p.name, cc:ccAt((p.cc||'').toUpperCase(), +p.lon, +p.lat), lat:+p.lat, lon:+p.lon, date:t.date||'', air:false});
   const cl = [], norm = s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-zа-я0-9]/g,'');
   // сначала наземные (точный центр города), потом аэропорты
@@ -2524,7 +2563,7 @@ function countryStatsData(period){
   const codes = Object.keys(vm), countries = codes.filter(isCountry), terr = codes.filter(c=>!isCountry(c));
   // когда страна появилась впервые (по всем данным)
   const first = {}, seen = (cc, d)=>{ if(cc && d && (!first[cc] || d<first[cc])) first[cc]=d; };
-  for(const a of doneArcs()) for(const p of [a.a,a.b]) seen(p.country, a.f.date);
+  for(const a of doneArcs()) for(const p of placesOf(a)) seen(p.country, a.f.date);
   for(const t of trips.filter(doneTrip)) for(const p of [t.from,t.to]) seen((p.cc||'').toUpperCase(), t.date);
   for(const j of journeys.filter(j=>j.start<=today)) for(const cc of j.countries) seen(cc, j.start);
   const newBy = {}; for(const [cc,d] of Object.entries(first)) if(isCountry(cc)) (newBy[d.slice(0,4)] ??= []).push(cc);
@@ -2532,7 +2571,7 @@ function countryStatsData(period){
     return {label:T(k), n:got.length, total, codes:got}; });
   // «где бывали чаще всего» — без времени, когда вы там жили
   const cnt = {}, bump = (cc,k)=>{ const v = cnt[cc] ??= {flights:0, trips:0, journeys:0}; v[k]++; };
-  for(const a of arcs) for(const p of [a.a,a.b]) if(!homeAt(p.country, p.lat, p.lon, a.f.date)) bump(p.country,'flights');
+  for(const a of arcs) for(const p of placesOf(a)) if(!homeAt(p.country, p.lat, p.lon, a.f.date)) bump(p.country,'flights');
   for(const t of ts) for(const p of [t.from,t.to]){ const cc=(p.cc||'').toUpperCase(); if(cc && !homeAt(cc, +p.lat, +p.lon, t.date)) bump(cc,'trips'); }
   for(const j of js) for(const cc of j.countries) if(!homeAt(cc, null, null, j.start)) bump(cc,'journeys');
   const top = countries.filter(cc=>cnt[cc]).map(cc=>({cc, n:cnt[cc].flights+cnt[cc].trips+cnt[cc].journeys, v:cnt[cc]})).sort((a,b)=>b.n-a.n || countryName(a.cc).localeCompare(countryName(b.cc),LANG));
